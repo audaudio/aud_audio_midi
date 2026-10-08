@@ -12,9 +12,9 @@ environment:
 dependencies:
   aud_audio_graph:
     git:
-      url: https://github.com/audaudio/aud_audio_graph.git
+      url: git@github.com:audaudio/aud_audio_graph.git
       tag_pattern: "{{version}}"
-    version: ^0.0.1
+    version: ^0.0.2
   # path: ^1.9.0
 
 dev_dependencies:
