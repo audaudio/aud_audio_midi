@@ -1,6 +1,6 @@
 name: aud_audio_midi
 description: "MIDI bridge of the Audanika Audio Engine: aud_midi ports as event inlets and outlets of the graph"
-version: 0.0.1
+version: 0.0.2
 publish_to: none
 homepage: https://github.com/audaudio/aud_audio_midi
 repository: https://github.com/audaudio/aud_audio_midi
@@ -12,13 +12,13 @@ environment:
 dependencies:
   aud_audio_graph:
     git:
-      url: https://github.com/audaudio/aud_audio_graph.git
+      url: git@github.com:audaudio/aud_audio_graph.git
       tag_pattern: "{{version}}"
-    version: ^0.0.1
+    version: ^0.0.2
   # path: ^1.9.0
 
 dev_dependencies:
   dna_audanika: ^0.0.2
   helix: ^1.11.0
-  lints: ^6.0.0
-  test: ^1.25.6
+  lints: ^6.1.0
+  test: ^1.32.0
