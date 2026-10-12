@@ -22,11 +22,13 @@
 //   malformed.
 // - SysEx7 (F0 ... F7) is packed into type 3 packets of up to 6 bytes:
 //   complete, or start, continue and end. A SysEx that grows over the cap
-//   is dropped from there through its end and counted; the packets that
-//   left before the cap stay pushed. A SysEx a status byte other than F7
-//   ends is closed with what it holds and counts as malformed. A packet
-//   the sink refuses drops the rest of its SysEx, so no torn SysEx
-//   continues.
+//   is dropped from there through its end and counted, and so is one whose
+//   packet the sink refuses. When a packet of the SysEx left before the
+//   cut, the cut closes it at once with an end packet without data
+//   (counted as cut): the sink always sees a closed SysEx, short when it
+//   was cut. Only when the sink refuses that end packet too does a torn
+//   SysEx remain (counted as torn). A SysEx a status byte other than F7
+//   ends is closed with what it holds and counts as malformed.
 //
 // Nothing allocates: the state is the struct, the parser is realtime safe.
 
@@ -48,7 +50,9 @@ enum {
 };
 
 // The sink of the parser: one packet of `count` words. Returns nonzero when
-// it took the packet; a refused SysEx packet drops the rest of its SysEx.
+// it took the packet; a refused SysEx packet drops the rest of its SysEx,
+// after the end packet that closes it when an earlier packet of it was
+// taken.
 typedef int32_t (*AudMidiParserEmitFunction)(void* user, const uint32_t* words,
                                              uint32_t count);
 
@@ -70,9 +74,12 @@ typedef struct AudMidiParser {
   uint32_t sysex_bytes;  // bytes of the current SysEx
   // The counters: data bytes without a status, messages cut short,
   // undefined status bytes, SysEx without F7; SysEx dropped for their
-  // size.
+  // size; SysEx closed short with an end packet after a packet of theirs
+  // left; of those, the ones whose end packet the sink refused.
   uint64_t malformed;
   uint64_t sysex_dropped_size;
+  uint64_t sysex_cut;
+  uint64_t sysex_torn;
 } AudMidiParser;
 
 // Fills a parser for `group` with a cap of `max_sysex_bytes` (0: 65536).

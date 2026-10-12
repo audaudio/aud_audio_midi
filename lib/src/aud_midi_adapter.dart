@@ -146,6 +146,8 @@ class AudMidiAdapter {
         gone: native.ref.gone,
         malformed: native.ref.malformed,
         droppedClosed: native.ref.dropped_closed,
+        sysexCut: native.ref.sysex_cut,
+        sysexTorn: native.ref.sysex_torn,
       );
     } finally {
       calloc.free(native);
@@ -202,6 +204,8 @@ class AudMidiAdapterStats {
     this.gone = 0,
     this.malformed = 0,
     this.droppedClosed = 0,
+    this.sysexCut = 0,
+    this.sysexTorn = 0,
   });
 
   /// The packets the source accepted.
@@ -225,6 +229,15 @@ class AudMidiAdapterStats {
   /// The calls after [AudMidiAdapter.close], returned at once.
   final int droppedClosed;
 
+  /// The SysEx cut by the cap or a refused packet after a packet of theirs
+  /// was pushed: each was closed at once with an end packet without data,
+  /// so the source saw a closed, short SysEx.
+  final int sysexCut;
+
+  /// Of the [sysexCut], the ones whose end packet the source refused: a
+  /// torn SysEx reached the source.
+  final int sysexTorn;
+
   /// The counters as a map, e.g. for a report.
   Map<String, int> toJson() => {
     'pushed': pushed,
@@ -234,6 +247,8 @@ class AudMidiAdapterStats {
     'gone': gone,
     'malformed': malformed,
     'droppedClosed': droppedClosed,
+    'sysexCut': sysexCut,
+    'sysexTorn': sysexTorn,
   };
 
   @override

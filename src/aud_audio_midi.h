@@ -144,6 +144,10 @@ typedef struct AudMidiAdapterStats {
   uint64_t gone;                // GONE calls, each raised a release
   uint64_t malformed;           // bytes and packets the parser threw away
   uint64_t dropped_closed;      // calls after close, returned at once
+  uint64_t sysex_cut;           // SysEx closed short with an end packet
+                                // after a packet of theirs was pushed
+  uint64_t sysex_torn;          // of those, the ones whose end packet the
+                                // source refused: a torn SysEx got through
 } AudMidiAdapterStats;
 
 // [control] Creates an adapter for a source; NULL for a NULL config, a
@@ -168,7 +172,11 @@ AUD_EXPORT void aud_audio_midi_adapter_destroy(AudMidiAdapter* adapter);
 // packets. A SysEx over max_sysex_bytes, and a SysEx or a clock (type 1
 // 0xF8) while the source holds more than half its capacity, are dropped
 // and counted; a dropped SysEx is dropped through its end, and so is one
-// whose packet the source refused. GONE raises the source's release.
+// whose packet the source refused. When a packet of the SysEx was pushed
+// before the cut, an end packet without data closes it at once (sysex_cut)
+// - a type 3 end for SysEx7, a type 5 end with the stream id for SysEx8 -
+// so no torn SysEx reaches a node unless the source refuses the end too
+// (sysex_torn). GONE raises the source's release.
 AUD_EXPORT void aud_audio_midi_tap(void* user, uint32_t kind,
                                    const void* data, uint32_t count,
                                    int64_t host_time_ns);

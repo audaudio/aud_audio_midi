@@ -55,8 +55,25 @@ void emitOne(uint32_t word, AudMidiParserEmitFunction emit, void* user) {
 // ............................................................................
 // SysEx
 
-// Emits the buffered SysEx bytes as a packet of `status`; a refusal drops
-// the rest of the SysEx.
+// Cuts the SysEx in progress: the rest of it is dropped through its end.
+// When a packet of it left already, an end packet without data closes it
+// at once, so the sink sees a closed - short - SysEx; one the sink refuses
+// leaves the SysEx torn.
+void cutSysex(AudMidiParser& p, AudMidiParserEmitFunction emit, void* user) {
+  p.sysex_dropping = 1;
+  p.sysex_pending = 0;
+  if (!p.sysex_started) return;
+  p.sysex_started = 0;
+  p.sysex_cut += 1;
+  const uint32_t words[2] = {
+      (static_cast<uint32_t>(AUD_UMP_TYPE_DATA64) << 28) | (p.group << 24) |
+          (static_cast<uint32_t>(AUD_MIDI_SYSEX_END) << 20),
+      0};
+  if (emit(user, words, 2) == 0) p.sysex_torn += 1;
+}
+
+// Emits the buffered SysEx bytes as a packet of `status`; a refusal cuts
+// the SysEx.
 void flushSysex(AudMidiParser& p, uint32_t status,
                 AudMidiParserEmitFunction emit, void* user) {
   const uint8_t* b = p.sysex_buffer;
@@ -71,7 +88,7 @@ void flushSysex(AudMidiParser& p, uint32_t status,
   std::memset(p.sysex_buffer, 0, sizeof(p.sysex_buffer));
   p.sysex_pending = 0;
   if (emit(user, words, 2) == 0) {
-    p.sysex_dropping = 1;
+    cutSysex(p, emit, user);
   } else {
     p.sysex_started = 1;
   }
@@ -106,8 +123,7 @@ void sysexData(AudMidiParser& p, uint8_t byte, AudMidiParserEmitFunction emit,
   p.sysex_bytes += 1;
   if (p.sysex_bytes > p.max_sysex_bytes) {
     p.sysex_dropped_size += 1;
-    p.sysex_dropping = 1;
-    p.sysex_pending = 0;
+    cutSysex(p, emit, user);
     return;
   }
   // A full buffer leaves when the next byte arrives, not before: six bytes

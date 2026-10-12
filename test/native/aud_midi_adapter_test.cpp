@@ -33,15 +33,17 @@ struct Pushed {
 };
 
 // The fake event source: a fixed table of packets (nothing allocates on
-// the tap path), a size the test sets, a refusal switch, the releases, and
-// a `dead` flag the test raises after close - a push that finds it set is
-// a violation of the close guarantee.
+// the tap path), a size the test sets, a refusal switch and a count of
+// pushes to refuse as if the queue were full, the releases, and a `dead`
+// flag the test raises after close - a push that finds it set is a
+// violation of the close guarantee.
 struct FakeSource {
   static constexpr uint32_t kCapacity = 1 << 16;
   Pushed packets[kCapacity];
   std::atomic<uint32_t> count{0};
   std::atomic<uint32_t> size{0};
   std::atomic<int32_t> pushResult{AUD_OK};
+  std::atomic<uint32_t> refuseNext{0};
   std::atomic<uint32_t> pushCalls{0};
   std::atomic<uint32_t> releases{0};
   bool dead = false;
@@ -54,6 +56,10 @@ struct FakeSource {
     s.pushCalls.fetch_add(1, std::memory_order_relaxed);
     const int32_t result = s.pushResult.load(std::memory_order_relaxed);
     if (result != AUD_OK) return result;
+    if (s.refuseNext.load(std::memory_order_relaxed) > 0) {
+      s.refuseNext.fetch_sub(1, std::memory_order_relaxed);
+      return AUD_ERROR_QUEUE_FULL;
+    }
     const uint32_t index = s.count.load(std::memory_order_relaxed);
     if (index >= kCapacity) return AUD_ERROR_QUEUE_FULL;
     Pushed& p = s.packets[index];
@@ -106,6 +112,7 @@ struct Fixture {
     source.count.store(0);
     source.size.store(0);
     source.pushResult.store(AUD_OK);
+    source.refuseNext.store(0);
     source.pushCalls.store(0);
     source.releases.store(0);
     source.dead = false;
@@ -147,6 +154,14 @@ uint32_t system(uint32_t status, uint32_t group = 0) {
 // The first word of a type 3 (or 5) SysEx packet with `bytes` bytes.
 uint32_t sysex(uint32_t status, uint32_t bytes, uint32_t type = 3) {
   return (type << 28) | (status << 20) | (bytes << 16);
+}
+
+// The first word of a type 5 SysEx8 packet on `group` with `bytes` bytes,
+// the stream id among them.
+uint32_t sysex8(uint32_t status, uint32_t bytes, uint32_t streamId,
+                uint32_t group) {
+  return (5u << 28) | (group << 24) | (status << 20) | (bytes << 16) |
+         (streamId << 8);
 }
 
 // A MIDI 2.0 note on: two words.
@@ -251,22 +266,107 @@ AUD_TEST(adapter_counts_what_the_source_refuses) {
 
 AUD_TEST(adapter_caps_a_ump_sysex_through_its_end) {
   Fixture f(16, 8);
-  // Start 6, continue 6 (over the cap), end 2: the start stays pushed,
-  // the rest is dropped; a complete one within the cap follows.
+  // Start 6, continue 6 (over the cap), end 2: the start stays pushed and
+  // the cut closes it with an end packet without data at once, the rest is
+  // dropped; a complete one within the cap follows.
   f.ump({sysex(AUD_MIDI_SYSEX_START, 6), 0, sysex(AUD_MIDI_SYSEX_CONTINUE, 6),
          0, sysex(AUD_MIDI_SYSEX_END, 2), 0, sysex(AUD_MIDI_SYSEX_COMPLETE, 6),
          0, midi1(0x90, 60, 100)});
-  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.pushed() == 4);
   AUD_CHECK(f.source.at(0).words[0] == sysex(AUD_MIDI_SYSEX_START, 6));
-  AUD_CHECK(f.source.at(1).words[0] == sysex(AUD_MIDI_SYSEX_COMPLETE, 6));
-  AUD_CHECK(f.source.at(2).words[0] == midi1(0x90, 60, 100));
+  AUD_CHECK(f.source.at(1).words[0] == sysex(AUD_MIDI_SYSEX_END, 0));
+  AUD_CHECK(f.source.at(1).words[1] == 0);
+  AUD_CHECK(f.source.at(1).count == 2);
+  AUD_CHECK(f.source.at(2).words[0] == sysex(AUD_MIDI_SYSEX_COMPLETE, 6));
+  AUD_CHECK(f.source.at(3).words[0] == midi1(0x90, 60, 100));
   AUD_CHECK(f.stats().sysex_dropped_size == 1);
-  // SysEx8 (type 5, four words) counts its bytes the same way.
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_torn == 0);
+  // SysEx8 (type 5, four words) counts its bytes the same way; a complete
+  // packet over the cap pushed nothing, so nothing closes it.
   f.ump({sysex(AUD_MIDI_SYSEX_COMPLETE, 9, 5), 0, 0, 0});
   AUD_CHECK(f.stats().sysex_dropped_size == 2);
-  AUD_CHECK(f.source.pushed() == 3);
-  f.ump({sysex(AUD_MIDI_SYSEX_COMPLETE, 8, 5), 0, 0, 0});
+  AUD_CHECK(f.stats().sysex_cut == 1);
   AUD_CHECK(f.source.pushed() == 4);
+  f.ump({sysex(AUD_MIDI_SYSEX_COMPLETE, 8, 5), 0, 0, 0});
+  AUD_CHECK(f.source.pushed() == 5);
+}
+
+AUD_TEST(adapter_closes_a_cut_ump_sysex7_with_the_end_packet_of_its_group) {
+  Fixture f(16, 8);
+  // The start on group 7 is pushed, the continue is over the cap: the end
+  // packet carries the type, the group, status end and no bytes - the
+  // exact words 0x37300000 0x00000000. The rest is dropped through its
+  // end, a note passes.
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 6) | (7u << 24), 0x01020304,
+         sysex(AUD_MIDI_SYSEX_CONTINUE, 3) | (7u << 24), 0,
+         sysex(AUD_MIDI_SYSEX_END, 1) | (7u << 24), 0, midi1(0x90, 60, 100)},
+        99);
+  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.at(1).count == 2);
+  AUD_CHECK(f.source.at(1).words[0] == 0x37300000u);
+  AUD_CHECK(f.source.at(1).words[1] == 0u);
+  AUD_CHECK(f.source.at(1).time == 99);
+  AUD_CHECK(f.source.at(2).words[0] == midi1(0x90, 60, 100));
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_dropped_size == 1);
+}
+
+AUD_TEST(adapter_closes_a_cut_ump_sysex8_with_the_end_packet_of_its_stream) {
+  Fixture f(16, 8);
+  // A SysEx8 on group 2 with the stream id 0x2A: the start of 8 bytes is
+  // pushed, the continue takes it over the cap. The end packet counts one
+  // byte, the stream id, and carries no data - the exact words 0x5231_2A00
+  // 0 0 0.
+  f.ump({sysex8(AUD_MIDI_SYSEX_START, 8, 0x2A, 2), 0x01020304, 0x05060700, 0,
+         sysex8(AUD_MIDI_SYSEX_CONTINUE, 4, 0x2A, 2), 0x08090A00, 0, 0,
+         sysex8(AUD_MIDI_SYSEX_END, 2, 0x2A, 2), 0x0B000000, 0, 0,
+         midi1(0x90, 60, 100)});
+  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.at(0).words[0] == sysex8(AUD_MIDI_SYSEX_START, 8, 0x2A, 2));
+  AUD_CHECK(f.source.at(1).count == 4);
+  AUD_CHECK(f.source.at(1).words[0] == 0x52312A00u);
+  AUD_CHECK(f.source.at(1).words[1] == 0u);
+  AUD_CHECK(f.source.at(1).words[2] == 0u);
+  AUD_CHECK(f.source.at(1).words[3] == 0u);
+  AUD_CHECK(f.source.at(2).words[0] == midi1(0x90, 60, 100));
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_torn == 0);
+  AUD_CHECK(f.stats().sysex_dropped_size == 1);
+  // A whole SysEx8 within the cap afterwards is untouched.
+  f.ump({sysex8(AUD_MIDI_SYSEX_COMPLETE, 3, 0x2B, 2), 0x01020000, 0, 0});
+  AUD_CHECK(f.source.pushed() == 4);
+  AUD_CHECK(f.stats().sysex_cut == 1);
+}
+
+AUD_TEST(adapter_closes_a_ump_sysex_the_source_refuses_mid_way) {
+  Fixture f;
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 6), 0});
+  // The continue is refused: the end packet closes the SysEx at once and
+  // the rest, the end of 1, is dropped; the note passes.
+  f.source.refuseNext.store(1);
+  f.ump({sysex(AUD_MIDI_SYSEX_CONTINUE, 6), 0, sysex(AUD_MIDI_SYSEX_END, 1), 0,
+         midi1(0x90, 60, 100)});
+  AUD_CHECK(f.source.pushCalls.load() == 4);
+  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.at(1).words[0] == sysex(AUD_MIDI_SYSEX_END, 0));
+  AUD_CHECK(f.source.at(1).words[1] == 0);
+  AUD_CHECK(f.source.at(2).words[0] == midi1(0x90, 60, 100));
+  AUD_CHECK(f.stats().rejected == 1);
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_torn == 0);
+  // The source refuses the end packet too: the SysEx stays torn, counted;
+  // the rest is still dropped through its end.
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 6), 0});
+  f.source.refuseNext.store(2);
+  f.ump({sysex(AUD_MIDI_SYSEX_CONTINUE, 6), 0, sysex(AUD_MIDI_SYSEX_END, 1), 0,
+         midi1(0x80, 60, 0)});
+  AUD_CHECK(f.source.pushCalls.load() == 8);
+  AUD_CHECK(f.source.pushed() == 5);
+  AUD_CHECK(f.source.at(4).words[0] == midi1(0x80, 60, 0));
+  AUD_CHECK(f.stats().rejected == 3);
+  AUD_CHECK(f.stats().sysex_cut == 2);
+  AUD_CHECK(f.stats().sysex_torn == 1);
 }
 
 AUD_TEST(adapter_drops_sysex_and_clock_while_the_source_is_over_half_full) {
@@ -314,6 +414,8 @@ AUD_TEST(adapter_drops_the_rest_of_a_ump_sysex_the_source_refuses) {
   AUD_CHECK(f.source.pushed() == 1);
   AUD_CHECK(f.source.at(0).words[0] == midi1(0x90, 60, 100));
   AUD_CHECK(f.stats().rejected == 1);
+  // Nothing of the SysEx was pushed, so nothing closes it.
+  AUD_CHECK(f.stats().sysex_cut == 0);
 }
 
 // ............................................................................
@@ -344,26 +446,103 @@ AUD_TEST(adapter_applies_the_rules_to_the_byte_path) {
   AUD_CHECK(f.stats().malformed == 1);
   f.bytes({0xF0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xF7});
   AUD_CHECK(f.stats().sysex_dropped_size == 1);
-  AUD_CHECK(f.source.pushed() == 1);  // the start packet
+  // The start packet and the end packet that closes the cut SysEx.
+  AUD_CHECK(f.source.pushed() == 2);
+  AUD_CHECK(f.stats().sysex_cut == 1);
   f.source.size.store(9);
   f.bytes({0xF8, 0xF0, 1, 2, 3, 4, 5, 6, 7, 0xF7, 0x90, 60, 100, 0xF0, 1,
            0xF7});
   // The clock, the start of the long SysEx and the short SysEx are dropped;
-  // the note passes.
-  AUD_CHECK(f.source.pushed() == 2);
-  AUD_CHECK(f.source.at(1).words[0] == midi1(0x90, 60, 100));
+  // the note passes. Nothing of the long SysEx was pushed, so nothing
+  // closes it.
+  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.at(2).words[0] == midi1(0x90, 60, 100));
   AUD_CHECK(f.stats().dropped_fill == 3);
   AUD_CHECK(f.stats().rejected == 0);
+  AUD_CHECK(f.stats().sysex_cut == 1);
   f.source.size.store(0);
   f.source.pushResult.store(AUD_ERROR_QUEUE_FULL);
   f.bytes({0xF0, 1, 2, 3, 4, 5, 6, 7});
   f.source.pushResult.store(AUD_OK);
   f.bytes({8, 9, 10, 11, 12, 13, 14, 0xF7, 0xB0, 7, 0x7F});
+  // The refused start packet was the first of its SysEx: dropped through
+  // its end, nothing closes it.
   AUD_CHECK(f.stats().rejected == 1);
-  AUD_CHECK(f.source.pushed() == 3);
-  AUD_CHECK(f.source.at(2).words[0] == midi1(0xB0, 7, 0x7F));
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.source.pushed() == 4);
+  AUD_CHECK(f.source.at(3).words[0] == midi1(0xB0, 7, 0x7F));
   aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, nullptr, 2, 1);
   AUD_CHECK(f.stats().malformed == 2);
+  // What the tap counted outside the parser survives the next feed: F7
+  // without a SysEx is one more malformed byte.
+  f.bytes({0xF7});
+  AUD_CHECK(f.stats().malformed == 3);
+}
+
+AUD_TEST(adapter_closes_a_cut_byte_sysex_with_an_empty_end_packet) {
+  Fixture f(16, 8, 3);
+  // The cap of 8 on group 3: the start packet left before the ninth byte,
+  // which cuts the SysEx - the end packet carries the type, the group,
+  // status end and no bytes, the exact words 0x33300000 0x00000000, at the
+  // time of the chunk that cut it.
+  f.bytes({0xF0, 1, 2, 3, 4, 5, 6, 7, 8}, 50);
+  AUD_CHECK(f.source.pushed() == 1);
+  f.bytes({9}, 60);
+  AUD_CHECK(f.source.pushed() == 2);
+  AUD_CHECK(f.source.at(1).count == 2);
+  AUD_CHECK(f.source.at(1).words[0] == 0x33300000u);
+  AUD_CHECK(f.source.at(1).words[1] == 0u);
+  AUD_CHECK(f.source.at(1).time == 60);
+  // The rest is dropped through F7, the note passes.
+  f.bytes({10, 11, 0xF7, 0x90, 60, 100}, 70);
+  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.at(2).words[0] == midi1(0x90, 60, 100, 3));
+  AUD_CHECK(f.stats().sysex_dropped_size == 1);
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_torn == 0);
+  // Cap 3: the cut comes within the first packet, nothing was pushed, so
+  // nothing closes it.
+  AudMidiAdapterConfig config = configOf(f.source, 16, 3, 3);
+  AudMidiAdapter* small = aud_audio_midi_adapter_create(&config);
+  const uint8_t four[] = {0xF0, 1, 2, 3, 4, 0xF7};
+  aud_audio_midi_tap(small, AUD_MIDI_TAP_BYTES, four, 6, 80);
+  AUD_CHECK(f.source.pushed() == 3);
+  AudMidiAdapterStats stats{};
+  stats.struct_size = sizeof(AudMidiAdapterStats);
+  AUD_CHECK(aud_audio_midi_adapter_stats(small, &stats) == AUD_OK);
+  AUD_CHECK(stats.sysex_dropped_size == 1);
+  AUD_CHECK(stats.sysex_cut == 0);
+  aud_audio_midi_adapter_destroy(small);
+}
+
+AUD_TEST(adapter_closes_a_byte_sysex_the_source_refuses_mid_way) {
+  Fixture f(16, 0, 3);
+  // The source refuses the continue packet after the start was pushed: the
+  // end packet without data closes the SysEx at once, the rest is dropped
+  // through F7, the control change passes.
+  f.bytes({0xF0, 1, 2, 3, 4, 5, 6, 7});
+  AUD_CHECK(f.source.pushed() == 1);
+  f.source.refuseNext.store(1);
+  f.bytes({8, 9, 10, 11, 12, 13, 0xF7, 0xB0, 7, 0x7F});
+  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.at(1).count == 2);
+  AUD_CHECK(f.source.at(1).words[0] == 0x33300000u);
+  AUD_CHECK(f.source.at(1).words[1] == 0u);
+  AUD_CHECK(f.source.at(2).words[0] == midi1(0xB0, 7, 0x7F, 3));
+  AUD_CHECK(f.stats().rejected == 1);
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_torn == 0);
+  // The source refuses the end packet too: the SysEx stays torn, counted.
+  f.bytes({0xF0, 1, 2, 3, 4, 5, 6, 7});
+  f.source.refuseNext.store(2);
+  f.bytes({8, 9, 10, 11, 12, 13, 0xF7, 0x80, 60, 0});
+  AUD_CHECK(f.source.pushed() == 5);
+  AUD_CHECK(f.source.at(4).words[0] == midi1(0x80, 60, 0, 3));
+  AUD_CHECK(f.stats().rejected == 3);
+  AUD_CHECK(f.stats().sysex_cut == 2);
+  AUD_CHECK(f.stats().sysex_torn == 1);
+  AUD_CHECK(f.stats().sysex_dropped_size == 0);
+  AUD_CHECK(f.stats().malformed == 0);
 }
 
 // ............................................................................

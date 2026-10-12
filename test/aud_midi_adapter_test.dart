@@ -140,16 +140,54 @@ void main() {
 
     test('applies the SysEx cap and the half-full rule', () {
       adapter.pushBytes([0xF0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0xF7], hostTimeNs: 1);
-      expect(source.packets, hasLength(1));
+      // The start packet, and the end packet without data that closes the
+      // SysEx the cap cut: type 3, group 2, status end, no bytes.
+      expect(source.pushedAsLists, [
+        [
+          [0x32160102, 0x03040506],
+          1,
+        ],
+        [
+          [0x32300000, 0],
+          1,
+        ],
+      ]);
       expect(adapter.stats.sysexDroppedSize, 1);
+      expect(adapter.stats.sysexCut, 1);
+      expect(adapter.stats.sysexTorn, 0);
       source.size = 9;
       adapter.pushUmp([0x12F80000, 0x30010100, 0, 0x22903C64], hostTimeNs: 2);
-      expect(source.packets, hasLength(2));
+      expect(source.packets, hasLength(3));
       expect(source.packets.last.$1, [0x22903C64]);
       expect(adapter.stats.droppedFill, 2);
       source.pushResult = AUD_ERROR_QUEUE_FULL;
       adapter.pushUmp([0x22903C64], hostTimeNs: 3);
       expect(adapter.stats.rejected, 1);
+    });
+
+    test('closes a UMP SysEx the source refuses mid-way', () {
+      // A SysEx within the cap: the start of 2 bytes is pushed.
+      adapter.pushUmp([0x30120102, 0], hostTimeNs: 1);
+      // The continue packet is refused with a full queue, the end packet
+      // that closes the SysEx is refused too: the SysEx stays torn.
+      source.pushResult = AUD_ERROR_QUEUE_FULL;
+      adapter.pushUmp([0x30230304, 0x05000000], hostTimeNs: 2);
+      source.pushResult = AUD_OK;
+      adapter.pushUmp([0x30310600, 0, 0x22903C64], hostTimeNs: 3);
+      expect(source.pushedAsLists, [
+        [
+          [0x30120102, 0],
+          1,
+        ],
+        [
+          [0x22903C64],
+          3,
+        ],
+      ]);
+      final stats = adapter.stats;
+      expect(stats.rejected, 2);
+      expect(stats.sysexCut, 1);
+      expect(stats.sysexTorn, 1);
     });
 
     test('raises release on gone', () {
@@ -194,6 +232,8 @@ void main() {
         'gone': 0,
         'malformed': 0,
         'droppedClosed': 2,
+        'sysexCut': 0,
+        'sysexTorn': 0,
       });
       expect(stats.toString(), 'AudMidiAdapterStats(${stats.toJson()})');
       final address = adapter.address;

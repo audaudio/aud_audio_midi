@@ -62,7 +62,11 @@ external int aud_audio_midi_register(ffi.Pointer<core.AudHostApi> host);
 /// packets. A SysEx over max_sysex_bytes, and a SysEx or a clock (type 1
 /// 0xF8) while the source holds more than half its capacity, are dropped
 /// and counted; a dropped SysEx is dropped through its end, and so is one
-/// whose packet the source refused. GONE raises the source's release.
+/// whose packet the source refused. When a packet of the SysEx was pushed
+/// before the cut, an end packet without data closes it at once (sysex_cut)
+/// - a type 3 end for SysEx7, a type 5 end with the stream id for SysEx8 -
+/// so no torn SysEx reaches a node unless the source refuses the end too
+/// (sysex_torn). GONE raises the source's release.
 @ffi.Native<
   ffi.Void Function(
     ffi.Pointer<ffi.Void>,
@@ -234,6 +238,16 @@ final class AudMidiAdapterStats extends ffi.Struct {
   @ffi.Uint64()
   external int dropped_closed;
 
+  /// SysEx closed short with an end packet
+  /// after a packet of theirs was pushed
+  @ffi.Uint64()
+  external int sysex_cut;
+
+  /// of those, the ones whose end packet the
+  /// source refused: a torn SysEx got through
+  @ffi.Uint64()
+  external int sysex_torn;
+
   static ffi.Pointer<AudMidiAdapterStats> $allocate(
     ffi.Allocator $allocator, {
     required int struct_size,
@@ -245,6 +259,8 @@ final class AudMidiAdapterStats extends ffi.Struct {
     required int gone,
     required int malformed,
     required int dropped_closed,
+    required int sysex_cut,
+    required int sysex_torn,
   }) => $allocator<AudMidiAdapterStats>()
     ..ref.struct_size = struct_size
     ..ref.reserved = reserved
@@ -254,7 +270,9 @@ final class AudMidiAdapterStats extends ffi.Struct {
     ..ref.dropped_fill = dropped_fill
     ..ref.gone = gone
     ..ref.malformed = malformed
-    ..ref.dropped_closed = dropped_closed;
+    ..ref.dropped_closed = dropped_closed
+    ..ref.sysex_cut = sysex_cut
+    ..ref.sysex_torn = sysex_torn;
 }
 
 /// What a backend of aud_midi calls with the MIDI of a port: `host_time_ns`

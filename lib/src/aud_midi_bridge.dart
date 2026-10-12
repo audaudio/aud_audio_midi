@@ -1,0 +1,807 @@
+// @license
+// Copyright (c) Audanika. All Rights Reserved.
+//
+// Use of this source code is governed by terms that can be
+// found in the LICENSE file in the root of this package.
+
+import 'dart:async';
+import 'dart:math' as math;
+
+import 'package:aud_audio/aud_audio_ffi.dart';
+import 'package:aud_midi/aud_midi.dart';
+
+import 'aud_audio_midi_ffi.dart';
+import 'aud_midi_adapter.dart';
+import 'aud_midi_clock.dart';
+import 'aud_midi_nodes.dart';
+
+// #############################################################################
+/// How a binding feeds its event source (midi-002).
+enum AudMidiPath {
+  /// The backend calls the adapter on its receive thread (native-001).
+  native,
+
+  /// The bridge receives the packets in Dart and pushes them through FFI.
+  dart,
+}
+
+// #############################################################################
+/// The options of an [AudMidiBridge].
+class AudMidiBridgeOptions {
+  /// Creates the options.
+  const AudMidiBridgeOptions({
+    this.timing = AudSourceTiming.fixed,
+    this.marginNs = 1000000,
+    this.preferNative = true,
+    this.capacity = 4096,
+    this.maxSysexBytes = 65536,
+    this.refreshInterval = const Duration(seconds: 1),
+  });
+
+  /// The timing of new inputs (midi-003).
+  final AudSourceTiming timing;
+
+  /// m of midi-003: the margin of the fixed latency in nanoseconds.
+  final int marginNs;
+
+  /// Whether inputs take the native path where the backend offers it.
+  final bool preferNative;
+
+  /// The events an input's source holds.
+  final int capacity;
+
+  /// The longest SysEx an input passes on.
+  final int maxSysexBytes;
+
+  /// How often the bridge looks at the engine's timing while it runs.
+  final Duration refreshInterval;
+}
+
+// #############################################################################
+/// The bridge between the ports of `aud_midi` and an engine (S8, midi-002).
+///
+/// An input port becomes an `aud.midi.input` node whose outlet the app
+/// connects to its instruments; an event source of the graph feeds the
+/// node, from the backend's receive thread through a native tap
+/// (native-001) or from Dart. An output port becomes an `aud.midi.output`
+/// node; what reaches its inlet leaves through `aud_midi` at the time its
+/// frame reaches the audio output. The bridge keeps its bindings by port
+/// id: a port that goes releases its notes, and a port that returns - under
+/// the same id, or on Android under a new id with the same fingerprint
+/// (ports-001) - plays again. It is an extension of the engine, so the
+/// engine closes it before it disposes the graph.
+class AudMidiBridge extends AudEngineExtension {
+  /// Bridges the ports of [midi] into [engine].
+  AudMidiBridge(
+    this.engine,
+    this.midi, {
+    this.options = const AudMidiBridgeOptions(),
+    AudMidiClock? clock,
+  }) : clock = clock ?? AudMidiClock() {
+    engine.addExtension(this);
+    _changes = midi.changes.listen(_onPortEvent);
+    _notifications = engine.graph.notifications.listen(_onNotification);
+    if (engine.state == AudEngineState.running) _startRefresh();
+  }
+
+  /// The node package of the port nodes for [AudEngine.new].
+  static AudNativeNodePackage get package =>
+      AudNativeNodePackage(AudAudioMidi.name, AudAudioMidi.register);
+
+  /// The engine.
+  final AudEngine engine;
+
+  /// The MIDI ports.
+  final Midi midi;
+
+  /// The options.
+  final AudMidiBridgeOptions options;
+
+  /// The mapping between MIDI time and host time.
+  final AudMidiClock clock;
+
+  @override
+  String get name => AudAudioMidi.name;
+
+  /// Whether the bridge is closed.
+  bool get isClosed => _isClosed;
+
+  /// The input ports `aud_midi` knows, also those that are offline.
+  List<MidiPortInfo> get inputPorts => [
+    for (final port in midi.ports)
+      if (port.direction == MidiDirection.input) port,
+  ];
+
+  /// The output ports `aud_midi` knows, also those that are offline.
+  List<MidiPortInfo> get outputPorts => [
+    for (final port in midi.ports)
+      if (port.direction == MidiDirection.output) port,
+  ];
+
+  /// The open inputs.
+  List<AudMidiInput> get inputs => List.unmodifiable(_inputs);
+
+  /// The open outputs.
+  List<AudMidiOutput> get outputs => List.unmodifiable(_outputs);
+
+  /// C of midi-003 for the engine's timing: the longest period between two
+  /// renders, at least the stream's buffer period, plus the reported output
+  /// latency plus the margin. Before the first block the buffer period
+  /// stands in alone. (The graph's nominal period is its prepared largest
+  /// block, which a stream may never deliver.)
+  int get fixedLatencyNs {
+    final format = engine.format;
+    final buffer = format.sampleRate <= 0
+        ? 0
+        : (format.bufferFrames * 1e9 / format.sampleRate).round();
+    final timing = engine.timing;
+    if (!timing.valid) return buffer + options.marginNs;
+    final period = math.max(timing.maxPeriodNs, buffer);
+    return period + timing.outputLatencyNs.round() + options.marginNs;
+  }
+
+  // ...........................................................................
+  /// Opens [port] as an input: an `aud.midi.input` node - [node] when the
+  /// graph already has one, e.g. from a document - fed by an event source
+  /// with [timing]. [path] forces the path; by default the native one where
+  /// the backend offers it.
+  Future<AudMidiInput> openInput(
+    MidiPortInfo port, {
+    AudNode? node,
+    AudSourceTiming? timing,
+    AudMidiPath? path,
+    String? name,
+  }) async {
+    _checkOpen();
+    if (port.direction != MidiDirection.input) {
+      throw ArgumentError.value(port.id.value, 'port', 'is not an input');
+    }
+    final input = AudMidiInput._(
+      this,
+      _commit(node) ??
+          _createNode(AudMidiInputNode.typeId, name ?? _nodeName('in', port)),
+      port,
+      timing ?? options.timing,
+      path,
+      node == null,
+    );
+    _inputs.add(input);
+    await input._open();
+    return input;
+  }
+
+  /// Opens [port] as an output: an `aud.midi.output` node - [node] when the
+  /// graph already has one - whose events leave through `aud_midi`.
+  Future<AudMidiOutput> openOutput(
+    MidiPortInfo port, {
+    AudNode? node,
+    String? name,
+  }) async {
+    _checkOpen();
+    if (port.direction != MidiDirection.output) {
+      throw ArgumentError.value(port.id.value, 'port', 'is not an output');
+    }
+    final graph = engine.graph;
+    final output = AudMidiOutput._(
+      this,
+      _commit(node) ??
+          _createNode(AudMidiOutputNode.typeId, name ?? _nodeName('out', port)),
+      port,
+      node == null,
+    );
+    graph.transaction((tx) => tx.connectEvents(output.node, graph.io));
+    _outputs.add(output);
+    return output;
+  }
+
+  /// Looks at the engine's timing: raises the latency of the fixed inputs
+  /// when the period or the output latency grew, and lets the outputs
+  /// release their notes when the graph dropped notifications. The bridge
+  /// calls it every [AudMidiBridgeOptions.refreshInterval] while the engine
+  /// runs.
+  void refresh() {
+    if (_isClosed) return;
+    final latency = fixedLatencyNs;
+    for (final input in _inputs) {
+      input._raiseLatency(latency);
+    }
+    final dropped = engine.stats.notificationsDropped;
+    if (dropped > _notificationsDropped) {
+      _notificationsDropped = dropped;
+      for (final output in _outputs) {
+        output.releaseNotes();
+      }
+    }
+  }
+
+  /// Closes every input and output and leaves the engine; the nodes the
+  /// bridge created leave the graph.
+  Future<void> close() async {
+    if (_isClosed) return;
+    _isClosed = true;
+    _refresh?.cancel();
+    await _changes.cancel();
+    await _notifications.cancel();
+    for (final input in List.of(_inputs)) {
+      await input.close();
+    }
+    for (final output in List.of(_outputs)) {
+      await output.close();
+    }
+    engine.removeExtension(this);
+  }
+
+  // ...........................................................................
+  @override
+  void engineStarted(AudEngine engine) => _startRefresh();
+
+  @override
+  void engineStopping(AudEngine engine) {
+    _refresh?.cancel();
+    _refresh = null;
+  }
+
+  @override
+  void engineTimingChanged(AudEngine engine) {
+    final latency = fixedLatencyNs;
+    for (final input in _inputs) {
+      input._setLatency(latency);
+    }
+  }
+
+  /// Stops every producer before the graph frees the sources: the adapters
+  /// close synchronously, so no tap touches a source afterwards; the taps
+  /// detach in the background.
+  @override
+  void engineDisposing(AudEngine engine) {
+    _isClosed = true;
+    _refresh?.cancel();
+    unawaited(_changes.cancel());
+    unawaited(_notifications.cancel());
+    for (final input in _inputs) {
+      input._disposeSync();
+    }
+    _inputs.clear();
+    _outputs.clear();
+  }
+
+  // ######################
+  // Private
+  // ######################
+
+  final List<AudMidiInput> _inputs = [];
+  final List<AudMidiOutput> _outputs = [];
+  late final StreamSubscription<MidiPortEvent> _changes;
+  late final StreamSubscription<AudGraphNotification> _notifications;
+  Timer? _refresh;
+  bool _isClosed = false;
+  int _notificationsDropped = 0;
+  int _nextToken = 1;
+
+  void _checkOpen() {
+    if (_isClosed) throw StateError('The MIDI bridge is closed');
+  }
+
+  /// Commits [node], which may come from a transaction still open.
+  AudNode? _commit(AudNode? node) {
+    if (node != null) engine.graph.transaction((_) {});
+    return node;
+  }
+
+  /// A node id for [port] that the graph does not use yet, e.g.
+  /// `midi_in_loop_out` for the port "loop out".
+  String _nodeName(String direction, MidiPortInfo port) {
+    final words = port.name
+        .toLowerCase()
+        .replaceAll(RegExp('[^a-z0-9]+'), '_')
+        .replaceAll(RegExp(r'^_+|_+$'), '');
+    final base = words.isEmpty ? 'midi_$direction' : 'midi_${direction}_$words';
+    final graph = engine.graph;
+    var name = base;
+    for (var i = 2; graph.nodeNamed(name) != null; i++) {
+      name = '${base}_$i';
+    }
+    return name;
+  }
+
+  AudNode _createNode(String typeId, String name) {
+    final graph = engine.graph;
+    final node = graph.createNode(typeId, name: name);
+    graph.transaction((_) {});
+    return node;
+  }
+
+  void _startRefresh() {
+    _refresh?.cancel();
+    _refresh = Timer.periodic(options.refreshInterval, (_) => refresh());
+  }
+
+  int _token() => _nextToken++;
+
+  void _onPortEvent(MidiPortEvent event) {
+    for (final input in List.of(_inputs)) {
+      input._onPortEvent(event);
+    }
+    for (final output in _outputs) {
+      output._onPortEvent(event);
+    }
+  }
+
+  void _onNotification(AudGraphNotification notification) {
+    if (notification is! AudEventNotification) return;
+    for (final output in _outputs) {
+      if (output.node.handle == notification.node) {
+        output._send(notification);
+        return;
+      }
+    }
+  }
+}
+
+// #############################################################################
+/// The statistics of an [AudMidiInput].
+class AudMidiInputStats {
+  /// Creates the statistics.
+  const AudMidiInputStats({
+    required this.path,
+    required this.timing,
+    required this.latencyNs,
+    required this.source,
+    required this.adapter,
+    required this.recentLatencyNs,
+  });
+
+  /// The path that feeds the source; null while the port is gone.
+  final AudMidiPath? path;
+
+  /// The timing of the source.
+  final AudSourceTiming timing;
+
+  /// C of the fixed timing in nanoseconds.
+  final int latencyNs;
+
+  /// The statistics of the source: delivered, late, delays, latencies.
+  final AudEventSourceStats source;
+
+  /// The statistics of the adapter: parsed, dropped, gone; null while the
+  /// port is gone.
+  final AudMidiAdapterStats? adapter;
+
+  /// The median input to output time of the events delivered since the
+  /// statistics were read before; null when none arrived.
+  final int? recentLatencyNs;
+
+  /// The statistics as JSON.
+  Map<String, Object?> toJson() => {
+    'path': path?.name,
+    'timing': timing.name,
+    'latencyNs': latencyNs,
+    'recentLatencyNs': recentLatencyNs,
+    'source': source.toJson(),
+    'adapter': adapter?.toJson(),
+  };
+}
+
+// #############################################################################
+/// An input port bound to an `aud.midi.input` node.
+class AudMidiInput {
+  AudMidiInput._(
+    this.bridge,
+    this.node,
+    this._port,
+    this._timing,
+    this._forcedPath,
+    this._ownsNode,
+  );
+
+  /// The bridge.
+  final AudMidiBridge bridge;
+
+  /// The node whose outlet carries the port's events.
+  final AudNode node;
+
+  /// The port, as `aud_midi` last reported it.
+  MidiPortInfo get port => _port;
+
+  /// The timing of the source.
+  AudSourceTiming get timing => _timing;
+
+  /// The path that feeds the source; null while the port is gone.
+  AudMidiPath? get path => _path;
+
+  /// Whether the port is gone and the input waits for it.
+  bool get isWaiting => _path == null;
+
+  /// Whether the input is closed.
+  bool get isClosed => _isClosed;
+
+  /// The source of the node.
+  AudEventSource get source => _source;
+
+  /// The statistics; [AudMidiInputStats.recentLatencyNs] covers the events
+  /// since the last read.
+  AudMidiInputStats get stats {
+    final stats = _source.stats;
+    final histogram = stats.latencyHistogram;
+    final previous = _histogram;
+    _histogram = histogram;
+    return AudMidiInputStats(
+      path: _path,
+      timing: _timing,
+      latencyNs: _source.latencyNs,
+      source: stats,
+      adapter: _adapter?.stats,
+      recentLatencyNs: _recentMedianNs(previous, histogram),
+    );
+  }
+
+  // ...........................................................................
+  /// Binds the input to [port]; the node and its connections stay.
+  Future<void> retarget(MidiPortInfo port) => _serial(() async {
+    await _detachProducer();
+    _port = port;
+    _writeStrings();
+    await _attachProducer();
+  });
+
+  /// Gives the input a new timing; the source is created again.
+  Future<void> setTiming(AudSourceTiming timing) => _serial(() async {
+    if (timing == _timing) return;
+    await _detachProducer();
+    _source.dispose();
+    _timing = timing;
+    _source = _createSource();
+    await _attachProducer();
+  });
+
+  /// Closes the input: the producer detaches, the source goes and the
+  /// node leaves the graph when the bridge created it.
+  Future<void> close() => _serial(() async {
+    if (_isClosed) return;
+    _isClosed = true;
+    await _detachProducer();
+    _source.dispose();
+    bridge._inputs.remove(this);
+    if (_ownsNode) {
+      bridge.engine.graph.transaction((tx) => tx.remove(node));
+    }
+  });
+
+  // ######################
+  // Private
+  // ######################
+
+  final AudMidiPath? _forcedPath;
+  final bool _ownsNode;
+  MidiPortInfo _port;
+  AudSourceTiming _timing;
+  late AudEventSourceFfi _source;
+  AudMidiPath? _path;
+  AudMidiAdapter? _adapter;
+  MidiNativeTapHandle? _tap;
+  StreamSubscription<MidiPacket>? _packets;
+  int _producer = 0;
+  List<int>? _histogram;
+  bool _isClosed = false;
+  Future<void> _queue = Future.value();
+
+  Future<void> _serial(Future<void> Function() action) {
+    final result = _queue.then((_) => action());
+    _queue = result.catchError((Object _) {});
+    return result;
+  }
+
+  Future<void> _open() => _serial(() async {
+    _writeStrings();
+    _source = _createSource();
+    await _attachProducer();
+  });
+
+  AudEventSourceFfi _createSource() =>
+      bridge.engine.graph.createEventSource(
+            node,
+            timing: _timing,
+            latencyNs: _timing == AudSourceTiming.fixed
+                ? bridge.fixedLatencyNs
+                : 0,
+            capacity: bridge.options.capacity,
+          )
+          as AudEventSourceFfi;
+
+  void _writeStrings() {
+    final graph = bridge.engine.graph;
+    graph
+      ..setString(node, AudMidiPortNode.portId, _port.id.value)
+      ..setString(node, AudMidiPortNode.portFingerprint, _port.fingerprint);
+  }
+
+  /// Attaches a producer when the port is there: the native tap where the
+  /// backend offers it, else the Dart path.
+  Future<void> _attachProducer() async {
+    final input = bridge.midi.input(_port.id);
+    if (input == null || _port.state != MidiPortState.connected) {
+      _path = null;
+      return;
+    }
+    final token = bridge._token();
+    _source.attach(token);
+    _producer = token;
+    final adapter = AudMidiAdapter(
+      source: _source.address,
+      push: AudEventSourceFfi.pushFunctionAddress,
+      release: AudEventSourceFfi.releaseFunctionAddress,
+      size: AudEventSourceFfi.sizeFunctionAddress,
+      group: _port.group,
+      maxSysexBytes: bridge.options.maxSysexBytes,
+      capacity: _source.capacity,
+    );
+    _adapter = adapter;
+    final native =
+        _forcedPath != AudMidiPath.dart &&
+        (_forcedPath == AudMidiPath.native || bridge.options.preferNative) &&
+        input.supportsNativeTap;
+    if (native) {
+      try {
+        _tap = await input.attachNativeTap(
+          MidiNativeTap(
+            function: AudMidiAdapter.tapFunction,
+            user: adapter.address,
+          ),
+        );
+        _path = AudMidiPath.native;
+        return;
+      } on MidiException {
+        if (_forcedPath == AudMidiPath.native) rethrow;
+      }
+    }
+    // A port that goes arrives as a port event, which releases the notes.
+    _packets = input.packets.listen((packet) => _push(adapter, packet));
+    _path = AudMidiPath.dart;
+  }
+
+  void _push(AudMidiAdapter adapter, MidiPacket packet) {
+    final time = bridge.clock.toEngineNs(packet.time);
+    switch (packet) {
+      case MidiUmpPacket(:final words):
+        adapter.pushUmp(words, hostTimeNs: time);
+      case MidiBytesPacket(:final bytes):
+        adapter.pushBytes(bytes.bytes, hostTimeNs: time);
+    }
+  }
+
+  /// Detaches the producer: the tap returns after its last call, the
+  /// stream stops; then the source lets the producer go and the adapter
+  /// goes.
+  Future<void> _detachProducer() async {
+    final tap = _tap;
+    final packets = _packets;
+    final adapter = _adapter;
+    _tap = null;
+    _packets = null;
+    _adapter = null;
+    _path = null;
+    if (tap != null) {
+      try {
+        await tap.detach();
+      } on MidiException {
+        // The backend detached it already: the port went (Android).
+      }
+    }
+    await packets?.cancel();
+    adapter?.close();
+    if (_producer != 0 && !_source.isDisposed) {
+      _source.detach(_producer);
+    }
+    _producer = 0;
+    adapter?.dispose();
+  }
+
+  void _onPortEvent(MidiPortEvent event) {
+    if (_isClosed) return;
+    final info = event.port;
+    if (info.id == _port.id) {
+      _port = info;
+      final gone =
+          event is MidiPortRemoved || info.state != MidiPortState.connected;
+      if (gone) {
+        _source.release();
+        if (event is MidiPortRemoved || _path == AudMidiPath.dart) {
+          unawaited(_serial(_detachProducer));
+        }
+      } else if (_path == null) {
+        unawaited(_serial(_attachProducer));
+      }
+      return;
+    }
+    if (_path == null &&
+        event is MidiPortAdded &&
+        info.direction == MidiDirection.input &&
+        info.fingerprint == _port.fingerprint &&
+        info.state == MidiPortState.connected) {
+      unawaited(retarget(info));
+    }
+  }
+
+  void _setLatency(int latencyNs) {
+    if (_isClosed || _timing != AudSourceTiming.fixed) return;
+    _source.latencyNs = latencyNs;
+  }
+
+  void _raiseLatency(int latencyNs) {
+    if (_isClosed || _timing != AudSourceTiming.fixed) return;
+    if (latencyNs > _source.latencyNs) _source.latencyNs = latencyNs;
+  }
+
+  void _disposeSync() {
+    _isClosed = true;
+    _adapter?.close();
+    final packets = _packets;
+    final tap = _tap;
+    final adapter = _adapter;
+    _packets = null;
+    _tap = null;
+    _adapter = null;
+    unawaited(packets?.cancel());
+    // The tap may still be called until it detached; the closed adapter
+    // returns at once and is freed only after the detach.
+    unawaited(
+      Future(() async {
+        try {
+          await tap?.detach();
+        } on Object {
+          // The MIDI isolate or the port went first.
+        }
+        adapter?.dispose();
+      }),
+    );
+  }
+
+  static int? _recentMedianNs(List<int>? previous, List<int> current) {
+    var total = 0;
+    final delta = List<int>.filled(current.length, 0);
+    for (var i = 0; i < current.length; i++) {
+      final before = previous == null || i >= previous.length ? 0 : previous[i];
+      delta[i] = current[i] - before;
+      total += delta[i];
+    }
+    if (total == 0) return null;
+    final half = (total + 1) ~/ 2;
+    var seen = 0;
+    for (var i = 0; i < delta.length; i++) {
+      seen += delta[i];
+      if (seen >= half) return i * AudEventSourceStats.latencyBinNs;
+    }
+    // coverage:ignore-start
+    return null;
+    // coverage:ignore-end
+  }
+}
+
+// #############################################################################
+/// An output port bound to an `aud.midi.output` node.
+class AudMidiOutput {
+  AudMidiOutput._(this.bridge, this.node, this._port, this._ownsNode) {
+    final graph = bridge.engine.graph;
+    graph
+      ..setString(node, AudMidiPortNode.portId, _port.id.value)
+      ..setString(node, AudMidiPortNode.portFingerprint, _port.fingerprint);
+  }
+
+  /// The bridge.
+  final AudMidiBridge bridge;
+
+  /// The node whose inlet takes the events for the port.
+  final AudNode node;
+
+  /// The port, as `aud_midi` last reported it.
+  MidiPortInfo get port => _port;
+
+  /// Whether the port is gone and the output drops its events.
+  bool get isWaiting => _port.state != MidiPortState.connected;
+
+  /// The packets the output sent.
+  int get sent => _sent;
+
+  /// The notes that sound on the port: group << 12 | channel << 8 | note.
+  Set<int> get heldNotes => Set.unmodifiable(_held);
+
+  // ...........................................................................
+  /// Sends a note off for every note that sounds on the port.
+  void releaseNotes() {
+    final output = bridge.midi.output(_port.id);
+    for (final key in _held) {
+      final word =
+          0x20000000 |
+          ((key >> 12) & 0xF) << 24 |
+          (0x80 | (key >> 8) & 0xF) << 16 |
+          (key & 0x7F) << 8;
+      unawaited(_guard(output?.sendUmp([word])));
+    }
+    _held.clear();
+  }
+
+  /// Closes the output; the node leaves the graph when the bridge created
+  /// it.
+  Future<void> close() async {
+    releaseNotes();
+    bridge._outputs.remove(this);
+    if (_ownsNode) {
+      bridge.engine.graph.transaction((tx) => tx.remove(node));
+    }
+  }
+
+  // ######################
+  // Private
+  // ######################
+
+  final bool _ownsNode;
+  final Set<int> _held = {};
+  MidiPortInfo _port;
+  int _sent = 0;
+
+  void _onPortEvent(MidiPortEvent event) {
+    final info = event.port;
+    if (info.id == _port.id) {
+      _port = info;
+      if (event is MidiPortRemoved || isWaiting) _held.clear();
+      return;
+    }
+    if (isWaiting &&
+        event is MidiPortAdded &&
+        info.direction == MidiDirection.output &&
+        info.fingerprint == _port.fingerprint) {
+      _port = info;
+      bridge.engine.graph.setString(
+        node,
+        AudMidiPortNode.portId,
+        info.id.value,
+      );
+    }
+  }
+
+  /// Sends the event of [notification] at the host time its frame reaches
+  /// the audio output, so an external synth sounds with the engine.
+  void _send(AudEventNotification notification) {
+    if (isWaiting) return;
+    final event = notification.event;
+    if (event is! AudUmpEvent) return;
+    final words = event.packet.words;
+    if (words.isEmpty) return;
+    _track(words);
+    final timing = bridge.engine.timing;
+    final at = timing.valid
+        ? bridge.clock.toMidiTime(
+            timing.hostTimeAt(notification.samplePosition + event.sampleOffset),
+          )
+        : null;
+    _sent += 1;
+    unawaited(_guard(bridge.midi.output(_port.id)?.sendUmp(words, at: at)));
+  }
+
+  void _track(List<int> words) {
+    final word0 = words[0];
+    final type = word0 >> 28;
+    if (type != 2 && type != 4) return;
+    final status = (word0 >> 20) & 0xF;
+    final key =
+        ((word0 >> 24) & 0xF) << 12 |
+        ((word0 >> 16) & 0xF) << 8 |
+        ((word0 >> 8) & 0x7F);
+    final velocity = type == 2
+        ? word0 & 0x7F
+        : (words.length > 1 ? words[1] >> 16 : 0);
+    if (status == 0x9 && velocity > 0) {
+      _held.add(key);
+    } else if (status == 0x8 || status == 0x9) {
+      _held.remove(key);
+    }
+  }
+
+  static Future<void> _guard(Future<void>? sending) async {
+    try {
+      await sending;
+    } on MidiException {
+      // The port went while the packet travelled; its notes are released.
+    }
+  }
+}

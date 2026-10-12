@@ -10,3 +10,27 @@ dependency_overrides:
     path: ../aud_audio_graph
   aud_midi_standard:
     path: ../aud_midi_standard
+  aud_audio:
+    path: ../aud_audio
+  aud_audio_io:
+    path: ../aud_audio_io
+  aud_audio_web:
+    path: ../aud_audio_web
+  aud_midi:
+    path: ../aud_midi
+  aud_midi_core:
+    path: ../aud_midi_core
+  aud_midi_apple:
+    path: ../aud_midi_apple
+  aud_midi_android:
+    path: ../aud_midi_android
+  aud_midi_linux:
+    path: ../aud_midi_linux
+  aud_midi_network:
+    path: ../aud_midi_network
+  aud_midi_rtp:
+    path: ../aud_midi_rtp
+  aud_midi_web:
+    path: ../aud_midi_web
+  aud_midi_windows:
+    path: ../aud_midi_windows

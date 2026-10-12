@@ -12,3 +12,5 @@ library;
 export 'aud_audio_midi.dart';
 export 'src/aud_audio_midi_ffi.dart';
 export 'src/aud_midi_adapter.dart';
+export 'src/aud_midi_bridge.dart';
+export 'src/aud_midi_clock.dart';
