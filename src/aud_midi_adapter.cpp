@@ -66,7 +66,8 @@ struct AudMidiAdapter {
   std::atomic<uint64_t> sysexTorn{0};
   std::atomic<uint32_t> closed{0};
   std::atomic<uint32_t> inFlight{0};
-  // GONE asks the data path to forget the running status and the SysEx.
+  // GONE asks the data path to forget the running status and the SysEx
+  // of both paths; the next data call of either path takes it.
   std::atomic<uint32_t> resetParser{0};
 };
 
@@ -111,6 +112,13 @@ bool sysexEnds(uint32_t status) {
   return status == AUD_MIDI_SYSEX_END || status == AUD_MIDI_SYSEX_COMPLETE;
 }
 
+// The reset GONE asked for, taken by the next data call of either path
+// (both touch the state of both, so one call clears all of it): the
+// parser forgets its running status and its SysEx; an open SysEx of the
+// UMP path closes with the cut end packet, so that the source sees it
+// closed, and the rest of its state goes.
+void takeReset(AudMidiAdapter& a) AUD_MIDI_RT;
+
 // ............................................................................
 // The MIDI 1.0 byte path
 
@@ -140,9 +148,7 @@ void addCount(std::atomic<uint64_t>& counter, uint64_t before,
 
 void feedBytes(AudMidiAdapter& a, const uint8_t* bytes,
                uint32_t count) AUD_MIDI_RT {
-  if (a.resetParser.exchange(0, std::memory_order_relaxed) != 0) {
-    aud_midi_parser_reset(&a.parser);
-  }
+  takeReset(a);
   const AudMidiParser before = a.parser;
   aud_midi_parser_feed(&a.parser, bytes, count, emitFromParser, &a);
   addCount(a.malformed, before.malformed, a.parser.malformed);
@@ -176,6 +182,14 @@ void cutUmpSysex(AudMidiAdapter& a, uint32_t status) AUD_MIDI_RT {
   if (!pushPacket(a, words, aud_ump_word_count(words[0]))) {
     a.sysexTorn.fetch_add(1, std::memory_order_relaxed);
   }
+}
+
+void takeReset(AudMidiAdapter& a) AUD_MIDI_RT {
+  if (a.resetParser.exchange(0, std::memory_order_relaxed) == 0) return;
+  aud_midi_parser_reset(&a.parser);
+  if (a.umpSysexOpen) cutUmpSysex(a, AUD_MIDI_SYSEX_END);
+  a.umpSysexDropping = false;
+  a.umpSysexBytes = 0;
 }
 
 // A type 3 or 5 packet: the half-full rule at the start of a SysEx, the
@@ -214,6 +228,7 @@ void passSysex(AudMidiAdapter& a, const uint32_t* words,
 
 void passUmp(AudMidiAdapter& a, const uint32_t* words,
              uint32_t count) AUD_MIDI_RT {
+  takeReset(a);
   while (count > 0) {
     const uint32_t n = aud_ump_word_count(words[0]);
     if (n > count) {

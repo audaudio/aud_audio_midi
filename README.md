@@ -1,12 +1,13 @@
 # aud_audio_midi
 
 The MIDI bridge of the Audanika Audio Engine: the ports of the `aud_midi`
-family become event inlets and outlets of the graph of `aud_audio`. The
-package holds the port nodes `aud.midi.input` and `aud.midi.output`, the
-parser of MIDI 1.0 byte streams into Universal MIDI Packets and the tap
-adapter that pushes the MIDI of a port into an event source of the graph -
-on the receive thread of the backend or from a Dart isolate, through one
-native function.
+family become event inlets and outlets of the graph of `aud_audio`.
+`AudMidiBridge` binds the ports of a `Midi` to an engine by port id, with
+hot-plug; the package holds the port nodes `aud.midi.input` and
+`aud.midi.output`, the parser of MIDI 1.0 byte streams into Universal MIDI
+Packets and the tap adapter that pushes the MIDI of a port into an event
+source of the graph - on the receive thread of the backend or from a Dart
+isolate, through one native function.
 
 Part of the Audanika Audio Engine; planned in [aud_audio_pm](https://github.com/audaudio/aud_audio_pm).
 
@@ -37,9 +38,11 @@ dependencies:
 ```
 
 An app depends on `aud_audio` and registers the package with its engine
-(family-001). The build hook compiles the nodes, the parser and the adapter
-with the C++ toolchain of the target against the headers of
-`aud_audio_core`; the package itself needs no Flutter. The native tests
+(`AudMidiBridge.package`, family-001). The package depends on `aud_audio`
+and on `aud_midi`, `aud_midi_core` and `aud_midi_standard` from pub.dev,
+so it needs Flutter. The build hook compiles the nodes, the parser and the
+adapter with the C++ toolchain of the target against the headers of
+`aud_audio_core`. The native tests
 need Node.js and `clang++`; their RealtimeSanitizer build needs a clang
 that has it, e.g. LLVM from Homebrew on macOS (`brew install llvm`), and
 is skipped without one.
@@ -54,7 +57,16 @@ is skipped without one.
   [interop-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/interop-001.md)
   (Dart never runs on the audio thread),
   [abi-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/abi-001.md)
-  (the C ABI of the engine)
+  (the C ABI of the engine),
+  [interop-003](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/interop-003.md)
+  (event sources for native producers),
+  [midi-002](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-002.md)
+  (the native tap as the path),
+  [midi-003](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-003.md)
+  (the fixed latency), and in aud_midi_pm
+  [native-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/native-001.md)
+  and
+  [ports-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/ports-001.md)
 - The C API: [`src/aud_audio_midi.h`](src/aud_audio_midi.h); the parser:
   [`src/aud_midi_parser.h`](src/aud_midi_parser.h)
 - The notices: [`NOTICES.md`](NOTICES.md) - the package holds no
@@ -62,6 +74,29 @@ is skipped without one.
 - The guides in [`doc/guides`](doc/guides)
 
 ## Code Examples
+
+A MIDI keyboard plays an instrument of an engine:
+
+```dart
+import 'package:aud_audio/aud_audio_ffi.dart';
+import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_midi/aud_midi.dart';
+
+Future<void> play(AudNode instrument, AudEngine engine) async {
+  // The engine was created with AudMidiBridge.package in its packages.
+  final midi = await Midi.open();
+  final bridge = AudMidiBridge(engine, midi); // an extension of the engine
+  final keyboard = bridge.inputPorts.first;
+  final input = await bridge.openInput(keyboard); // native tap where offered
+  engine.graph.transaction(
+    (tx) => tx.connectEvents(input.node, instrument),
+  );
+  engine.start();
+  // Later: the timing and what arrived.
+  final stats = input.stats;
+  print('C ${stats.latencyNs / 1e6} ms, late ${stats.source.late}');
+}
+```
 
 The port nodes on a graph of `aud_audio_graph` (`aud_audio_midi_ffi.dart`
 on native platforms):
@@ -112,6 +147,38 @@ void feed(int source, int push, int release, int size) {
 
 ## How It Works
 
+### The bridge
+
+- `AudMidiBridge(engine, midi)` is an extension of the engine: the engine
+  starts its refresh, tells it when its timing starts again and, before
+  it disposes the graph, lets it close every adapter synchronously; the
+  taps detach afterwards in the background.
+- `openInput(port)` creates an `aud.midi.input` node (named after the
+  port), an event source for it and an adapter, and attaches a producer:
+  the native tap of the backend where it offers one (midi-002), else the
+  Dart path, which pushes the packets of `MidiInput.packets` through the
+  same adapter with their MIDI time mapped to host time (`AudMidiClock`).
+- The timing (midi-003): `fixed` by default - every event sounds at its
+  timestamp plus C = P + L + m: P the 99.9th percentile of the render
+  gaps (`periodNs`), L the reported output latency, m at least 1 ms and
+  the input's own 99.9th percentile of the delivery delay after 1000
+  events (`AudMidiInput.marginNs`). C only grows until the timing starts
+  again. `immediate` plays an event at the start of the block that
+  drains it.
+- Hot-plug: a port that goes raises the source's release - note offs,
+  sustain and soft pedal off; the node and its connections stay. A port
+  that returns under its id plays again; on Android, where a re-plugged
+  device gets a new id, the input rebinds to the port with the same
+  fingerprint (ports-001). `retarget(port)` moves an input to another
+  port.
+- `openOutput(port)` creates an `aud.midi.output` node connected to the
+  graph's event input; what reaches it leaves through `aud_midi` at the
+  time its frame reaches the audio output. When the graph drops
+  notifications, the outputs send note offs for what they hold.
+- `AudMidiInput.stats`: the source's counters and histograms (delivered,
+  late, delivery delay, input to output time), the adapter's counters and
+  the input to output time of the events since the last read.
+
 ### The nodes
 
 - `aud.midi.input` and `aud.midi.output` have no audio buses, the event
@@ -140,14 +207,17 @@ void feed(int source, int push, int release, int size) {
   may split at any byte.
 - A data byte without a status, a message a status byte cuts short, an
   undefined status byte and a SysEx without F7 count as malformed. A
-  SysEx over the cap is dropped from there through its end; the packets
-  that left before stay pushed.
+  SysEx over the cap is dropped from there through its end; when packets
+  of it left before, an end packet without data closes it at once, so a
+  receiver never sees a torn SysEx.
 
 ### The adapter
 
 - `aud_audio_midi_tap` is the `AudMidiTapFunction` of contract C2: UMP
   words pass through packet by packet, bytes go through the parser, GONE
-  raises the source's release and forgets the running status.
+  raises the source's release and forgets the running status and an open
+  SysEx; one the UMP path had pushed closes with the cut end packet at
+  the next data call.
 - The half-full rule: a SysEx that begins and a clock (0xF8) are dropped
   while the source holds more than half its capacity. The SysEx cap and a
   packet the source refuses drop a SysEx through its end, in both paths.
@@ -157,7 +227,8 @@ void feed(int source, int push, int release, int size) {
   detach of the tap completes; `aud_audio_midi_adapter_destroy` follows
   after the detach.
 - The counters: pushed, rejected by the source, SysEx dropped by size,
-  dropped by fill, gone, malformed, dropped after close.
+  dropped by fill, gone, malformed, dropped after close, SysEx cut (closed
+  with an end packet) and torn (the end packet refused).
 - The tap is marked `[[clang::nonblocking]]` where the compiler has it:
   no allocation, no lock, no system call on the data path. Data calls come
   from one thread at a time; GONE, close and the stats may come from
@@ -166,11 +237,13 @@ void feed(int source, int push, int release, int size) {
 ### Tests
 
 ```bash
-dart test
+flutter test
 node scripts/test-native.js
 ```
 
-- `dart test` runs the Dart tests - the registration and the nodes on the
+- `flutter test` runs the Dart tests - the bridge on `FakeMidiBackend`
+  with an engine on the null device (both paths, timing to the frame,
+  hot-plug, outputs, disposal), the registration and the nodes on the
   graph, the adapter on a fake source through `NativeCallable`, the web
   compile of the neutral library, the notices check - and the native
   tests.

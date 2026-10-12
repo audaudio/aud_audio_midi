@@ -31,8 +31,17 @@
 - Add percentile periods and margins per input
 
 - P is the 99.9th percentile of the render gaps, the stream's burst or buffer before there are any (midi-003)
+
 - m is at least the bridge's margin and the input's own 99.9th percentile of the delivery delay after 1000 events; C only grows between resets
+
 - AudMidiBridge.periodNs, baseLatencyNs, streamPeriodNs; AudMidiInput.marginNs; the margin in the statistics
+
+- Add the margin per transport and the review fixes
+
+- C follows P + L + m both ways; m grows at most to one period, for Bluetooth LE from 15 to 30 ms
+- isWaiting covers a port that went offline under its tap; a forced native path fails cleanly; a closed MIDI proxy does not stop close
+- GONE closes an open UMP SysEx; the notices check is CommonJS
+- README for the bridge
 
 ## 0.0.2 - 2026-10-08
 

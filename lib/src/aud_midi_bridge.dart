@@ -33,6 +33,8 @@ class AudMidiBridgeOptions {
     this.timing = AudSourceTiming.fixed,
     this.marginNs = 1000000,
     this.marginSamples = 1000,
+    this.bluetoothMarginNs = 15000000,
+    this.bluetoothMarginCapNs = 30000000,
     this.preferNative = true,
     this.capacity = 4096,
     this.maxSysexBytes = 65536,
@@ -49,6 +51,14 @@ class AudMidiBridgeOptions {
   /// The events after which an input takes its own 99.9th percentile of
   /// the delivery delay as m, when it is larger than [marginNs].
   final int marginSamples;
+
+  /// The smallest m of a Bluetooth LE port: one connection interval, since
+  /// BLE MIDI carries the sender's timestamps.
+  final int bluetoothMarginNs;
+
+  /// The largest m a Bluetooth LE port calibrates to; rarer, longer delays
+  /// play late.
+  final int bluetoothMarginCapNs;
 
   /// Whether inputs take the native path where the backend offers it.
   final bool preferNative;
@@ -195,8 +205,13 @@ class AudMidiBridge extends AudEngineExtension {
       path,
       node == null,
     );
+    try {
+      await input._open();
+    } catch (_) {
+      await input._discard();
+      rethrow;
+    }
     _inputs.add(input);
-    await input._open();
     return input;
   }
 
@@ -224,16 +239,17 @@ class AudMidiBridge extends AudEngineExtension {
     return output;
   }
 
-  /// Looks at the engine's timing: raises the latency of the fixed inputs
-  /// when the period or the output latency grew, and lets the outputs
-  /// release their notes when the graph dropped notifications. The bridge
+  /// Looks at the engine's timing: sets the latency of the fixed inputs to
+  /// the current P + L + m (it follows the output latency of a new route
+  /// both ways), and lets the outputs release their notes when the graph
+  /// dropped notifications. The bridge
   /// calls it every [AudMidiBridgeOptions.refreshInterval] while the engine
   /// runs.
   void refresh() {
     if (_isClosed) return;
     final base = baseLatencyNs;
     for (final input in _inputs) {
-      input._raiseLatency(base + input.marginNs);
+      input._setLatency(base + input.marginNs);
     }
     final dropped = engine.stats.notificationsDropped;
     if (dropped > _notificationsDropped) {
@@ -444,8 +460,9 @@ class AudMidiInput {
   /// The path that feeds the source; null while the port is gone.
   AudMidiPath? get path => _path;
 
-  /// Whether the port is gone and the input waits for it.
-  bool get isWaiting => _path == null;
+  /// Whether the port is gone and the input waits for it - also while the
+  /// tap stays attached to a port that went offline (CoreMIDI keeps it).
+  bool get isWaiting => _path == null || _gone;
 
   /// Whether the input is closed.
   bool get isClosed => _isClosed;
@@ -453,15 +470,32 @@ class AudMidiInput {
   /// The source of the node.
   AudEventSource get source => _source;
 
-  /// m of midi-003 for this input: the bridge's smallest margin, or the
-  /// input's own 99.9th percentile of the delivery delay once
-  /// [AudMidiBridgeOptions.marginSamples] events measured it, whichever is
-  /// larger.
-  int get marginNs {
+  /// m of midi-003 for this input: the bridge's smallest margin, raised to
+  /// the input's own 99.9th percentile of the delivery delay once
+  /// [AudMidiBridgeOptions.marginSamples] events measured it, but at most
+  /// one period P - a rarer, longer delay (e.g. the burst a keyboard sends
+  /// when its port opens) plays late instead of delaying every note. It
+  /// never shrinks for the life of the source.
+  int get marginNs => _marginOf(_source.stats);
+
+  /// The smallest m of the port's transport.
+  int _floorNs() => _port.transport == MidiTransport.bluetoothLe
+      ? bridge.options.bluetoothMarginNs
+      : bridge.options.marginNs;
+
+  int _marginOf(AudEventSourceStats stats) {
     final options = bridge.options;
-    final stats = _source.stats;
-    if (stats.delivered < options.marginSamples) return options.marginNs;
-    return math.max(options.marginNs, stats.delayPercentileNs(0.999) ?? 0);
+    final bluetooth = _port.transport == MidiTransport.bluetoothLe;
+    final floor = _floorNs();
+    final cap = bluetooth
+        ? options.bluetoothMarginCapNs
+        : math.max(options.marginNs, bridge.periodNs);
+    if (stats.delivered >= options.marginSamples) {
+      final measured = stats.delayPercentileNs(0.999) ?? 0;
+      final capped = math.min(measured, cap);
+      if (capped > _margin) _margin = capped;
+    }
+    return math.max(floor, _margin);
   }
 
   /// The statistics; [AudMidiInputStats.recentLatencyNs] covers the events
@@ -471,11 +505,12 @@ class AudMidiInput {
     final histogram = stats.latencyHistogram;
     final previous = _histogram;
     _histogram = histogram;
+    final margin = _marginOf(stats);
     return AudMidiInputStats(
       path: _path,
       timing: _timing,
       latencyNs: _source.latencyNs,
-      marginNs: marginNs,
+      marginNs: margin,
       source: stats,
       adapter: _adapter?.stats,
       recentLatencyNs: _recentMedianNs(previous, histogram),
@@ -487,6 +522,7 @@ class AudMidiInput {
   Future<void> retarget(MidiPortInfo port) => _serial(() async {
     await _detachProducer();
     _port = port;
+    _gone = false;
     _writeStrings();
     await _attachProducer();
   });
@@ -528,6 +564,9 @@ class AudMidiInput {
   MidiNativeTapHandle? _tap;
   StreamSubscription<MidiPacket>? _packets;
   int _producer = 0;
+  int _margin = 0;
+  bool _hasSource = false;
+  bool _gone = false;
   List<int>? _histogram;
   bool _isClosed = false;
   Future<void> _queue = Future.value();
@@ -538,9 +577,20 @@ class AudMidiInput {
     return result;
   }
 
+  /// Removes what [_open] created after it failed: the source and, when the
+  /// bridge created it, the node.
+  Future<void> _discard() async {
+    _isClosed = true;
+    if (_hasSource && !_source.isDisposed) _source.dispose();
+    if (_ownsNode) {
+      bridge.engine.graph.transaction((tx) => tx.remove(node));
+    }
+  }
+
   Future<void> _open() => _serial(() async {
     _writeStrings();
     _source = _createSource();
+    _hasSource = true;
     await _attachProducer();
   });
 
@@ -549,7 +599,7 @@ class AudMidiInput {
             node,
             timing: _timing,
             latencyNs: _timing == AudSourceTiming.fixed
-                ? bridge.fixedLatencyNs
+                ? bridge.baseLatencyNs + _floorNs()
                 : 0,
             capacity: bridge.options.capacity,
           )
@@ -583,10 +633,13 @@ class AudMidiInput {
       capacity: _source.capacity,
     );
     _adapter = adapter;
+    // A forced native path always tries the tap, so a backend without one
+    // refuses it instead of the input falling back to Dart.
     final native =
-        _forcedPath != AudMidiPath.dart &&
-        (_forcedPath == AudMidiPath.native || bridge.options.preferNative) &&
-        input.supportsNativeTap;
+        _forcedPath == AudMidiPath.native ||
+        (_forcedPath != AudMidiPath.dart &&
+            bridge.options.preferNative &&
+            input.supportsNativeTap);
     if (native) {
       try {
         _tap = await input.attachNativeTap(
@@ -598,12 +651,24 @@ class AudMidiInput {
         _path = AudMidiPath.native;
         return;
       } on MidiException {
-        if (_forcedPath == AudMidiPath.native) rethrow;
+        if (_forcedPath == AudMidiPath.native) {
+          _releaseProducer(adapter);
+          rethrow;
+        }
       }
     }
     // A port that goes arrives as a port event, which releases the notes.
     _packets = input.packets.listen((packet) => _push(adapter, packet));
     _path = AudMidiPath.dart;
+  }
+
+  /// Lets the producer of a failed attach go: the source forgets its token,
+  /// the adapter goes.
+  void _releaseProducer(AudMidiAdapter adapter) {
+    _source.detach(_producer);
+    _producer = 0;
+    _adapter = null;
+    adapter.dispose();
   }
 
   void _push(AudMidiAdapter adapter, MidiPacket packet) {
@@ -632,6 +697,8 @@ class AudMidiInput {
         await tap.detach();
       } on MidiException {
         // The backend detached it already: the port went (Android).
+      } on StateError {
+        // The MIDI proxy closed first; its host detached the tap.
       }
     }
     await packets?.cancel();
@@ -651,16 +718,18 @@ class AudMidiInput {
       final gone =
           event is MidiPortRemoved || info.state != MidiPortState.connected;
       if (gone) {
+        _gone = true;
         _source.release();
         if (event is MidiPortRemoved || _path == AudMidiPath.dart) {
           unawaited(_serial(_detachProducer));
         }
-      } else if (_path == null) {
-        unawaited(_serial(_attachProducer));
+      } else {
+        _gone = false;
+        if (_path == null) unawaited(_serial(_attachProducer));
       }
       return;
     }
-    if (_path == null &&
+    if (isWaiting &&
         event is MidiPortAdded &&
         info.direction == MidiDirection.input &&
         info.fingerprint == _port.fingerprint &&
@@ -672,11 +741,6 @@ class AudMidiInput {
   void _setLatency(int latencyNs) {
     if (_isClosed || _timing != AudSourceTiming.fixed) return;
     _source.latencyNs = latencyNs;
-  }
-
-  void _raiseLatency(int latencyNs) {
-    if (_isClosed || _timing != AudSourceTiming.fixed) return;
-    if (latencyNs > _source.latencyNs) _source.latencyNs = latencyNs;
   }
 
   void _disposeSync() {

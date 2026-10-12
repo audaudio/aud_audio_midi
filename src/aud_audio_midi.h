@@ -176,7 +176,9 @@ AUD_EXPORT void aud_audio_midi_adapter_destroy(AudMidiAdapter* adapter);
 // before the cut, an end packet without data closes it at once (sysex_cut)
 // - a type 3 end for SysEx7, a type 5 end with the stream id for SysEx8 -
 // so no torn SysEx reaches a node unless the source refuses the end too
-// (sysex_torn). GONE raises the source's release.
+// (sysex_torn). GONE raises the source's release and forgets an open
+// SysEx; one the UMP path had pushed closes with the cut end packet at
+// the next data call.
 AUD_EXPORT void aud_audio_midi_tap(void* user, uint32_t kind,
                                    const void* data, uint32_t count,
                                    int64_t host_time_ns);

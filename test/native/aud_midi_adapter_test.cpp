@@ -564,6 +564,75 @@ AUD_TEST(adapter_gone_raises_release_and_resets_the_parser) {
   AUD_CHECK(f.source.releases.load() == 3);
 }
 
+AUD_TEST(adapter_gone_closes_an_open_ump_sysex_at_the_next_call) {
+  Fixture f;
+  // The start of a SysEx was pushed when the port went: the next UMP call
+  // closes it with the cut end packet - of its type and group, at the
+  // time of that call - before its own packets, so the source never waits
+  // for an end that the port cannot deliver.
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 6) | (3u << 24), 0}, 1000);
+  f.gone(1500);
+  f.ump({midi1(0x90, 60, 100)}, 2000);
+  AUD_CHECK(f.source.pushed() == 3);
+  AUD_CHECK(f.source.at(1).words[0] == (sysex(AUD_MIDI_SYSEX_END, 0) | (3u << 24)));
+  AUD_CHECK(f.source.at(1).words[1] == 0);
+  AUD_CHECK(f.source.at(1).count == 2);
+  AUD_CHECK(f.source.at(1).time == 2000);
+  AUD_CHECK(f.source.at(2).words[0] == midi1(0x90, 60, 100));
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_torn == 0);
+  AUD_CHECK(f.stats().gone == 1);
+  AUD_CHECK(f.source.releases.load() == 1);
+  // A complete SysEx after it is a SysEx of its own; a second GONE with
+  // nothing open closes nothing.
+  f.ump({sysex(AUD_MIDI_SYSEX_COMPLETE, 2), 0});
+  f.gone();
+  f.ump({midi1(0x80, 60, 64)});
+  AUD_CHECK(f.source.pushed() == 5);
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  // The byte path takes the reset as well: an open SysEx of the UMP path
+  // closes before the bytes parse.
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 1), 0});
+  f.gone();
+  f.bytes({0x90, 62, 100});
+  AUD_CHECK(f.source.pushed() == 8);
+  AUD_CHECK(f.source.at(6).words[0] == sysex(AUD_MIDI_SYSEX_END, 0));
+  AUD_CHECK(f.source.at(7).words[0] == midi1(0x90, 62, 100));
+  AUD_CHECK(f.stats().sysex_cut == 2);
+  // The source refuses the end packet: the SysEx stays torn, counted.
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 1), 0});
+  f.gone();
+  f.source.refuseNext.store(1);
+  f.ump({midi1(0x80, 62, 64)});
+  AUD_CHECK(f.source.pushed() == 10);
+  AUD_CHECK(f.stats().sysex_cut == 3);
+  AUD_CHECK(f.stats().sysex_torn == 1);
+  AUD_CHECK(f.stats().rejected == 1);
+}
+
+AUD_TEST(adapter_gone_forgets_a_dropped_ump_sysex) {
+  Fixture f(16, 8);
+  // Start 6 pushed, continue 6 over the cap: cut, the rest is dropped
+  // through its end. The port goes before the end: the next call starts
+  // afresh, a continue and an end within the cap pass, nothing is
+  // dropped or cut any more.
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 6), 0, sysex(AUD_MIDI_SYSEX_CONTINUE, 6), 0});
+  AUD_CHECK(f.source.pushed() == 2);
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  f.gone();
+  f.ump({sysex(AUD_MIDI_SYSEX_CONTINUE, 2), 0, sysex(AUD_MIDI_SYSEX_END, 2), 0});
+  AUD_CHECK(f.source.pushed() == 4);
+  AUD_CHECK(f.source.at(2).words[0] == sysex(AUD_MIDI_SYSEX_CONTINUE, 2));
+  AUD_CHECK(f.source.at(3).words[0] == sysex(AUD_MIDI_SYSEX_END, 2));
+  AUD_CHECK(f.stats().sysex_cut == 1);
+  AUD_CHECK(f.stats().sysex_dropped_size == 1);
+  // Without the port's going, the same packets are dropped.
+  f.ump({sysex(AUD_MIDI_SYSEX_START, 6), 0, sysex(AUD_MIDI_SYSEX_CONTINUE, 6), 0});
+  f.ump({sysex(AUD_MIDI_SYSEX_CONTINUE, 2), 0, sysex(AUD_MIDI_SYSEX_END, 2), 0});
+  AUD_CHECK(f.source.pushed() == 6);
+  AUD_CHECK(f.stats().sysex_cut == 2);
+}
+
 AUD_TEST(adapter_close_stops_the_tap_and_keeps_the_stats) {
   Fixture f;
   f.ump({midi1(0x90, 60, 100)});

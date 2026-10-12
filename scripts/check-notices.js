@@ -18,8 +18,10 @@
 // Usage: node scripts/check-notices.js [repoDir]
 // Exits with 1 and the list of problems when the convention is broken.
 
-import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
-import { join, relative } from 'path';
+'use strict';
+
+const { existsSync, readdirSync, readFileSync, statSync } = require('node:fs');
+const { join, relative } = require('node:path');
 
 const permissive = [
   'MIT',
@@ -63,7 +65,7 @@ function componentRows(notices) {
     .filter((cells) => cells.length >= 3 && cells[0] !== 'Component');
 }
 
-export function checkNotices(repoDir) {
+function checkNotices(repoDir) {
   const problems = [];
   const thirdParty = join(repoDir, 'src', 'third_party');
   if (existsSync(thirdParty)) {
@@ -120,6 +122,6 @@ function main() {
   process.exit(1);
 }
 
-if (process.argv[1] && import.meta.url.endsWith(process.argv[1].split('/').pop())) {
-  main();
-}
+module.exports = { checkNotices };
+
+if (require.main === module) main();
