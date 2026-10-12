@@ -111,18 +111,20 @@ packages:
     source: path
     version: "0.1.0"
   aud_midi_rtp:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_midi_rtp"
-      relative: true
-    source: path
+      name: aud_midi_rtp
+      sha256: "3c4d1185ae4070d4de3a6eaf7737698d788fdc4e1ee4c5c71d42b3150a75f2d3"
+      url: "https://pub.dev"
+    source: hosted
     version: "0.1.0"
   aud_midi_standard:
     dependency: "direct main"
     description:
-      path: "../aud_midi_standard"
-      relative: true
-    source: path
+      name: aud_midi_standard
+      sha256: "6ce86e854c3e2f510b6e48de194e4a1b020f2c4568e5fa52e464771847b6043e"
+      url: "https://pub.dev"
+    source: hosted
     version: "0.1.0"
   aud_midi_web:
     dependency: "direct overridden"

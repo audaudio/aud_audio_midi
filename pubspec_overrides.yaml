@@ -8,8 +8,6 @@ dependency_overrides:
     path: ../aud_audio_core
   aud_audio_graph:
     path: ../aud_audio_graph
-  aud_midi_standard:
-    path: ../aud_midi_standard
   aud_audio:
     path: ../aud_audio
   aud_audio_io:
@@ -28,8 +26,6 @@ dependency_overrides:
     path: ../aud_midi_linux
   aud_midi_network:
     path: ../aud_midi_network
-  aud_midi_rtp:
-    path: ../aud_midi_rtp
   aud_midi_web:
     path: ../aud_midi_web
   aud_midi_windows:
