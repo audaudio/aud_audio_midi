@@ -1,0 +1,95 @@
+// @license
+// Copyright (c) Audanika. All Rights Reserved.
+//
+// Use of this source code is governed by terms that can be
+// found in the LICENSE file in the root of this package.
+
+// The parser of a MIDI 1.0 byte stream into Universal MIDI Packets (ticket
+// 26, scope 5): one per port, fed chunk by chunk, with its state kept
+// across the chunks, so a message may split at any byte. Internal to the
+// package; the adapter of aud_audio_midi.h owns one per port.
+//
+// - Channel voice messages become type 2 packets (MIDI 1.0 protocol) on
+//   the configured group; running status holds until a status byte that
+//   is not real-time cancels it. A data byte without a status is thrown
+//   away and counted as malformed, as is a message a new status byte cuts
+//   short.
+// - System common messages (F1, F2, F3, F6) become type 1 packets and
+//   cancel running status; the undefined F4 and F5 count as malformed.
+// - Real-time bytes (F8, FA, FB, FC, FE, FF) become type 1 packets of
+//   their own at once, also inside a SysEx or between the bytes of a
+//   message, which they do not disturb; the undefined F9 and FD count as
+//   malformed.
+// - SysEx7 (F0 ... F7) is packed into type 3 packets of up to 6 bytes:
+//   complete, or start, continue and end. A SysEx that grows over the cap
+//   is dropped from there through its end and counted; the packets that
+//   left before the cap stay pushed. A SysEx a status byte other than F7
+//   ends is closed with what it holds and counts as malformed. A packet
+//   the sink refuses drops the rest of its SysEx, so no torn SysEx
+//   continues.
+//
+// Nothing allocates: the state is the struct, the parser is realtime safe.
+
+#ifndef AUD_MIDI_PARSER_H
+#define AUD_MIDI_PARSER_H
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// The status nibbles of a type 3 packet.
+enum {
+  AUD_MIDI_SYSEX_COMPLETE = 0,
+  AUD_MIDI_SYSEX_START = 1,
+  AUD_MIDI_SYSEX_CONTINUE = 2,
+  AUD_MIDI_SYSEX_END = 3,
+};
+
+// The sink of the parser: one packet of `count` words. Returns nonzero when
+// it took the packet; a refused SysEx packet drops the rest of its SysEx.
+typedef int32_t (*AudMidiParserEmitFunction)(void* user, const uint32_t* words,
+                                             uint32_t count);
+
+// The parser; aud_midi_parser_init fills it, nothing else reads its fields.
+typedef struct AudMidiParser {
+  uint32_t group;
+  uint32_t max_sysex_bytes;
+  // The status whose data bytes are expected, 0 for none; channel voice
+  // status bytes hold as running status, system common ones for one
+  // message.
+  uint8_t status;
+  uint8_t data_count;
+  uint8_t data[2];
+  uint8_t in_sysex;
+  uint8_t sysex_dropping;
+  uint8_t sysex_started;  // a start packet left already
+  uint8_t sysex_pending;  // bytes waiting in the buffer
+  uint8_t sysex_buffer[6];
+  uint32_t sysex_bytes;  // bytes of the current SysEx
+  // The counters: data bytes without a status, messages cut short,
+  // undefined status bytes, SysEx without F7; SysEx dropped for their
+  // size.
+  uint64_t malformed;
+  uint64_t sysex_dropped_size;
+} AudMidiParser;
+
+// Fills a parser for `group` with a cap of `max_sysex_bytes` (0: 65536).
+void aud_midi_parser_init(AudMidiParser* parser, uint32_t group,
+                          uint32_t max_sysex_bytes);
+
+// Forgets the running status and the SysEx in progress; the counters
+// stay. For a port that comes back after it was gone.
+void aud_midi_parser_reset(AudMidiParser* parser);
+
+// Feeds `count` bytes; every packet they complete reaches `emit`.
+void aud_midi_parser_feed(AudMidiParser* parser, const uint8_t* bytes,
+                          uint32_t count, AudMidiParserEmitFunction emit,
+                          void* user);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif  // AUD_MIDI_PARSER_H

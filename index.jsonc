@@ -8,12 +8,16 @@
   "name": "aud_audio_midi",
   "summary": "MIDI bridge of the Audanika Audio Engine: aud_midi ports as event inlets and outlets of the graph.",
   "domain": [
-    "MIDI bridge of the Audanika Audio Engine"
+    "Port nodes aud.midi.input and aud.midi.output: events pass through at their offset, SysEx filtered at the output, the port id and fingerprint as string keys",
+    "The MIDI 1.0 byte stream parser to UMP: running status and SysEx across chunks, real-time inside SysEx, SysEx7 packed into type 3 packets",
+    "The tap adapter: the AudMidiTapFunction of a port pushes UMP into an event source of the graph through function pointers, with the SysEx caps, the half-full rule, GONE, close and counters; the Dart path calls it through FFI",
   ],
   "interfaces": {
     "uses": {
-      "aud_audio_graph": "package dependency"
+      "aud_audio_core": "package dependency: the C ABI 0.4 and the UMP helpers",
+      "aud_audio_graph": "package dependency: the event sources the adapter pushes into, the engine of the tests",
+      "aud_midi_standard": "dev dependency: UMP packets of the tests",
     },
-    "usedBy": {}
-  }
+    "usedBy": {},
+  },
 }
