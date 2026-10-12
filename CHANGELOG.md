@@ -49,16 +49,40 @@
 - Add review fixes of ticket 26
 
 - Document the options, AudMidiPath, setTiming, the output members and the latencies in both READMEs
+
 - Let the outputs release their notes when the engine disposes
+
 - Read and build the note words of the outputs with AudUmp of aud_audio_core
+
 - Share _applyLatencies, _releaseNotes and _writeStrings in the bridge; keep the outputs by node handle
+
 - Move _floorNs and _marginOf of the input below the private landmark
+
 - Make _reserve of the adapter void and name its initial buffer size
+
 - Share aud_midi_is_sysex_word of the parser header between the nodes and the adapter
+
 - Derive the close timeout log from kCloseTimeout
+
 - Point check-notices.js to NOTICES.md and license-001
+
 - Nest the bridge tests into groups by member
+
 - Let the detach of the disposal test fail with a MidiPortGone, which the MIDI host swallows
+
+- Add review fixes of ticket 26
+
+Document the options, AudMidiPath, setTiming, the output members and the latencies in both READMEs
+Let the outputs release their notes when the engine disposes
+Read and build the note words of the outputs with AudUmp of aud_audio_core
+Share _applyLatencies, _releaseNotes and _writeStrings in the bridge; keep the outputs by node handle
+Move _floorNs and _marginOf of the input below the private landmark
+Make _reserve of the adapter void and name its initial buffer size
+Share aud_midi_is_sysex_word of the parser header between the nodes and the adapter
+Derive the close timeout log from kCloseTimeout
+Point check-notices.js to NOTICES.md and license-001
+Nest the bridge tests into groups by member
+Let the detach of the disposal test fail with a MidiPortGone, which the MIDI host swallows
 
 ## 0.0.2 - 2026-10-08
 
