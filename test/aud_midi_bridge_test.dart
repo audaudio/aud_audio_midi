@@ -146,537 +146,595 @@ void main() {
   }
 
   group('AudMidiBridge', () {
-    test('lists the ports and opens an input on the native path', () async {
-      final bridge = await start();
-      expect(bridge.name, 'aud_audio_midi');
-      expect(engine.extensions, [bridge]);
-      expect(bridge.inputPorts.map((p) => p.id), [keys.id]);
-      expect(bridge.outputPorts.map((p) => p.id), [synth.id]);
-      final input = await bridge.openInput(keys);
-      expect(bridge.inputs, [input]);
-      expect(input.path, AudMidiPath.native);
-      expect(input.isWaiting, isFalse);
-      expect(input.timing, AudSourceTiming.fixed);
-      expect(input.port.id, keys.id);
-      expect(input.source.latencyNs, bridge.fixedLatencyNs);
-      expect(input.node.name, 'midi_in_keys');
-      expect(engine.graph.stringsOf(input.node), {
-        AudMidiPortNode.portId: keys.id.value,
-        AudMidiPortNode.portFingerprint: keys.fingerprint,
+    group('openInput', () {
+      test('lists the ports and opens an input on the native path', () async {
+        final bridge = await start();
+        expect(bridge.name, 'aud_audio_midi');
+        expect(engine.extensions, [bridge]);
+        expect(bridge.inputPorts.map((p) => p.id), [keys.id]);
+        expect(bridge.outputPorts.map((p) => p.id), [synth.id]);
+        final input = await bridge.openInput(keys);
+        expect(bridge.inputs, [input]);
+        expect(input.path, AudMidiPath.native);
+        expect(input.isWaiting, isFalse);
+        expect(input.timing, AudSourceTiming.fixed);
+        expect(input.port.id, keys.id);
+        expect(input.source.latencyNs, bridge.fixedLatencyNs);
+        expect(input.node.name, 'midi_in_keys');
+        expect(engine.graph.stringsOf(input.node), {
+          AudMidiPortNode.portId: keys.id.value,
+          AudMidiPortNode.portFingerprint: keys.fingerprint,
+        });
+        final tap = _fake.taps[keys.id]!;
+        expect(tap.function, AudMidiAdapter.tapFunction);
+        expect(() => bridge.openInput(synth), throwsArgumentError);
+        expect(() => bridge.openOutput(keys), throwsArgumentError);
       });
-      final tap = _fake.taps[keys.id]!;
-      expect(tap.function, AudMidiAdapter.tapFunction);
-      expect(() => bridge.openInput(synth), throwsArgumentError);
-      expect(() => bridge.openOutput(keys), throwsArgumentError);
-    });
 
-    test('plays native UMP at its timestamp plus C, to the frame', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      final output = await loop(bridge, input);
-      final tap = _fake.taps[keys.id]!;
-      final at = host + 2000000;
-      callTap(tap, 1, [_noteOn], at);
-      final target = at + input.source.latencyNs;
-      await playPast(target);
-      await waitFor(() => _fake.sent.isNotEmpty);
-      expect(sentWords(), [_noteOn]);
-      final sentAt = bridge.clock.toEngineNs(_fake.sent.single.packet.time);
-      expect((sentAt - target).abs(), lessThan(30000));
-      expect(output.sent, 1);
-      expect(output.heldNotes, hasLength(1));
-      final stats = input.stats;
-      expect(stats.path, AudMidiPath.native);
-      expect(stats.source.delivered, 1);
-      expect(stats.source.late, 0);
-      expect(stats.adapter!.pushed, 1);
-      expect(stats.recentLatencyNs, isNotNull);
-      expect(input.stats.recentLatencyNs, isNull);
-      expect(stats.toJson()['path'], 'native');
-    });
-
-    test('feeds bytes on the Dart path with the MIDI time mapped', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys, path: AudMidiPath.dart);
-      expect(input.path, AudMidiPath.dart);
-      expect(_fake.taps, isEmpty);
-      await loop(bridge, input);
-      await waitFor(() => _fake.calls.contains('openPort ${keys.id}'));
-      final time = const MidiSystemClock().now();
-      _fake.inject(
-        keys.id,
-        MidiBytesPacket(bytes: MidiBytes([0x90, 60, 100]), time: time),
-      );
-      _fake.inject(
-        keys.id,
-        MidiUmpPacket(words: Uint32List.fromList([_noteOff]), time: time),
-      );
-      await waitFor(() => input.source.stats.pushed == 2);
-      await playPast(bridge.clock.toEngineNs(time) + input.source.latencyNs);
-      await waitFor(() => _fake.sent.length == 2);
-      expect(sentWords(), [_noteOn, _noteOff]);
-    });
-
-    test('immediate plays at the block that drains it', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(
-        keys,
-        timing: AudSourceTiming.immediate,
-      );
-      expect(input.source.latencyNs, 0);
-      await loop(bridge, input);
-      final blockStart = host;
-      callTap(_fake.taps[keys.id]!, 1, [_noteOn], host - 100000000);
-      await play(1);
-      await waitFor(() => _fake.sent.isNotEmpty);
-      final sentAt = bridge.clock.toEngineNs(_fake.sent.single.packet.time);
-      final outputAt = engine.timing.hostTimeAt(engine.timing.samplePosition);
-      expect((sentAt - outputAt).abs(), lessThan(30000));
-      expect(sentAt, greaterThanOrEqualTo(blockStart - 30000));
-    });
-
-    test('falls back to the Dart path when the tap is refused', () async {
-      final bridge = await start();
-      _fake.failWith(attachNativeTap: const MidiUnsupported('no taps'));
-      final input = await bridge.openInput(keys);
-      expect(input.path, AudMidiPath.dart);
-      await input.close();
-      await expectLater(
-        bridge.openInput(keys, path: AudMidiPath.native),
-        throwsA(isA<MidiUnsupported>()),
-      );
-    });
-
-    test('releases a held note when its port goes', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      await loop(bridge, input);
-      callTap(_fake.taps[keys.id]!, 1, [_noteOn], host);
-      await playPast(host + input.source.latencyNs);
-      await waitFor(() => _fake.sent.length == 1);
-      _fake.removePort(keys.id);
-      await waitFor(() => input.isWaiting);
-      await play(2);
-      await waitFor(() => _fake.sent.length >= 2);
-      // The graph closes the note with velocity 64.
-      expect(
-        sentWords().skip(1).map((w) => w & 0xFFFFFF00),
-        contains(_noteOff),
-      );
-      expect(input.stats.path, isNull);
-      expect(input.stats.adapter, isNull);
-    });
-
-    test('rebinds a re-plugged port by its fingerprint (ports-001)', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      _fake.removePort(keys.id);
-      await waitFor(() => input.isWaiting);
-      final replugged = _fake.addPort(
-        _fake.portInfo(
-          'keys-2',
-          direction: MidiDirection.input,
-          name: 'Keys',
-          serialNumber: 'K1',
-        ),
-      );
-      await waitFor(() => !input.isWaiting);
-      expect(input.port.id, replugged.id);
-      expect(_fake.taps.keys, [replugged.id]);
-      expect(
-        engine.graph.stringsOf(input.node)[AudMidiPortNode.portId],
-        replugged.id.value,
-      );
-    });
-
-    test('a port that returns under its id plays again', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys, path: AudMidiPath.dart);
-      _fake.addPort(keys.copyWith(state: MidiPortState.offline));
-      await waitFor(() => input.isWaiting);
-      _fake.addPort(keys.copyWith(state: MidiPortState.connected));
-      await waitFor(() => !input.isWaiting);
-      expect(input.path, AudMidiPath.dart);
-    });
-
-    test('retargets, changes the timing and closes', () async {
-      final bridge = await start();
-      final other = _fake.addPort(
-        _fake.portInfo('pads', direction: MidiDirection.input, name: 'Pads'),
-      );
-      final input = await bridge.openInput(keys);
-      await input.retarget(other);
-      expect(input.port.id, other.id);
-      expect(_fake.taps.keys, [other.id]);
-      await input.setTiming(AudSourceTiming.immediate);
-      await input.setTiming(AudSourceTiming.immediate);
-      expect(input.timing, AudSourceTiming.immediate);
-      expect(input.source.timing, AudSourceTiming.immediate);
-      await input.close();
-      await input.close();
-      expect(input.isClosed, isTrue);
-      expect(bridge.inputs, isEmpty);
-      expect(_fake.taps, isEmpty);
-      expect(
-        engine.graph.nodes.where((n) => n.typeId == AudMidiInputNode.typeId),
-        isEmpty,
-      );
-    });
-
-    test('keeps the latency of the engine', () async {
-      final bridge = await start(
-        options: const AudMidiBridgeOptions(marginNs: 2000000),
-      );
-      final input = await bridge.openInput(keys);
-      final immediate = await bridge.openInput(
-        keys.copyWith(),
-        node: engine.graph.createNode(AudMidiInputNode.typeId),
-        timing: AudSourceTiming.immediate,
-        path: AudMidiPath.dart,
-      );
-      input.source.latencyNs = 1;
-      bridge.refresh();
-      expect(input.source.latencyNs, bridge.fixedLatencyNs);
-      // C follows P + L + m both ways, e.g. to a route of less latency.
-      input.source.latencyNs = input.source.latencyNs + 5000000;
-      bridge.refresh();
-      expect(input.source.latencyNs, bridge.fixedLatencyNs);
-      bridge.engineTimingChanged(engine);
-      expect(input.source.latencyNs, bridge.fixedLatencyNs);
-      expect(immediate.source.latencyNs, 0);
-    });
-
-    test('a fixed latency before the first block comes from the format', () {
-      final bridge = AudMidiBridge(engine, midi);
-      final format = engine.format;
-      final frames = format.burstFrames > 0
-          ? format.burstFrames
-          : format.bufferFrames;
-      expect(bridge.periodNs, (frames * 1e9 / format.sampleRate).round());
-      expect(bridge.baseLatencyNs, bridge.periodNs);
-      expect(bridge.fixedLatencyNs, bridge.periodNs + 1000000);
-    });
-
-    test('the period of a stream is its burst, else its buffer', () {
-      int period(double rate, int burst, int buffer) =>
-          AudMidiBridge.streamPeriodNs(
-            sampleRate: rate,
-            burstFrames: burst,
-            bufferFrames: buffer,
-          );
-      expect(period(48000, 192, 384), 4000000);
-      expect(period(48000, 0, 480), 10000000);
-      expect(period(0, 192, 384), 0);
-    });
-
-    test('takes P from the render gaps and m from the input', () async {
-      final bridge = await start(
-        options: const AudMidiBridgeOptions(marginSamples: 8),
-      );
-      // One gap of 6 ms among a few renders: P - the cap of m - is then the
-      // period of a device, not the gap of renders called back to back.
-      await play(10);
-      await Future<void>.delayed(const Duration(milliseconds: 6));
-      host = AudClock.nowNs();
-      await play(10);
-      final timing = engine.timing;
-      expect(bridge.periodNs, timing.periodPercentileNs(0.999));
-      expect(
-        bridge.baseLatencyNs,
-        bridge.periodNs + timing.outputLatencyNs.round(),
-      );
-      final input = await bridge.openInput(keys);
-      expect(input.marginNs, 1000000);
-      final tap = _fake.taps[keys.id]!;
-      // Eight events that took 3 ms from their timestamp to the source.
-      for (var i = 0; i < 8; i++) {
-        callTap(tap, 1, [_noteOn], AudClock.nowNs() - 3000000);
-      }
-      await play(4);
-      expect(input.source.stats.delivered, 8);
-      expect(input.marginNs, greaterThanOrEqualTo(3000000));
-      bridge.refresh();
-      expect(
-        input.source.latencyNs,
-        greaterThanOrEqualTo(bridge.baseLatencyNs + 3000000),
-      );
-      expect(input.stats.marginNs, input.marginNs);
-      expect(input.stats.toJson()['marginNs'], input.marginNs);
-      // A burst of late deliveries (a keyboard's port opening) raises m at
-      // most to one period, and m never shrinks.
-      final before = input.marginNs;
-      for (var i = 0; i < 40; i++) {
-        callTap(tap, 1, [_noteOff], AudClock.nowNs() - 900000000);
-      }
-      await play(4);
-      expect(input.marginNs, lessThan(100000000));
-      expect(input.marginNs, greaterThanOrEqualTo(before));
-    });
-
-    test('a Bluetooth port starts at 15 ms of margin, capped at 30', () async {
-      final bridge = await start(
-        options: const AudMidiBridgeOptions(marginSamples: 8),
-      );
-      final ble = _fake.addPort(
-        _fake.portInfo(
-          'ble',
-          direction: MidiDirection.input,
-          name: 'Keys BLE',
-          transport: MidiTransport.bluetoothLe,
-        ),
-      );
-      await waitFor(() => bridge.inputPorts.any((p) => p.id == ble.id));
-      final input = await bridge.openInput(ble);
-      expect(input.marginNs, 15000000);
-      expect(input.source.latencyNs, bridge.baseLatencyNs + 15000000);
-      final tap = _fake.taps[ble.id]!;
-      for (var i = 0; i < 10; i++) {
-        callTap(tap, 1, [_noteOn], AudClock.nowNs() - 200000000);
-      }
-      await play(60);
-      // The delay histogram ends at 25 ms, below the cap of 30 ms.
-      expect(input.marginNs, inInclusiveRange(25000000, 30000000));
-    });
-
-    test(
-      'a forced native path needs a tap; a failed open leaves nothing',
-      () async {
-        await midi.close();
-        _fake = FakeMidiBackend(hasNativeTaps: false);
-        keys = _fake.addPort(
-          _fake.portInfo('keys', direction: MidiDirection.input, name: 'Keys'),
-        );
-        midi = await Midi.open(
-          options: const MidiOptions(backend: _backend, inIsolate: true),
-        );
-        final bridge = await start();
-        await expectLater(
-          bridge.openInput(keys, path: AudMidiPath.native),
-          throwsA(isA<MidiUnsupported>()),
-        );
-        expect(bridge.inputs, isEmpty);
-        expect(
-          engine.graph.nodes.where((n) => n.typeId == AudMidiInputNode.typeId),
-          isEmpty,
-        );
-        final input = await bridge.openInput(keys);
-        expect(input.path, AudMidiPath.dart);
-      },
-    );
-
-    test(
-      'a port that goes offline under its tap makes the input wait',
-      () async {
-        final bridge = await start();
-        final input = await bridge.openInput(keys);
-        expect(input.path, AudMidiPath.native);
-        _fake.addPort(keys.copyWith(state: MidiPortState.offline));
-        await waitFor(() => input.isWaiting);
-        // CoreMIDI keeps the tap of an offline port: still native.
-        expect(input.path, AudMidiPath.native);
-        expect(_fake.taps.keys, [keys.id]);
-        _fake.addPort(keys.copyWith(state: MidiPortState.connected));
-        await waitFor(() => !input.isWaiting);
-        expect(input.path, AudMidiPath.native);
-      },
-    );
-
-    test('a bridge closes after its MIDI proxy closed', () async {
-      final bridge = await start();
-      await bridge.openInput(keys);
-      await midi.close();
-      await bridge.close();
-      expect(bridge.isClosed, isTrue);
-      expect(engine.extensions, isEmpty);
-    });
-
-    test('refreshes while the engine runs', () async {
-      final bridge = AudMidiBridge(
-        engine,
-        midi,
-        options: const AudMidiBridgeOptions(
-          refreshInterval: Duration(milliseconds: 5),
-        ),
-      );
-      engine.start();
-      await play(1);
-      final input = await bridge.openInput(keys);
-      input.source.latencyNs = 1;
-      await waitFor(() => input.source.latencyNs > 1);
-      engine.stop();
-      input.source.latencyNs = 1;
-      await Future<void>.delayed(const Duration(milliseconds: 20));
-      expect(input.source.latencyNs, 1);
-      final running = AudMidiBridge(engine, midi);
-      engine.start();
-      await running.close();
-    });
-
-    test('outputs release their notes when notifications drop', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      final output = await loop(bridge, input);
-      callTap(_fake.taps[keys.id]!, 1, [_noteOn], host);
-      await playPast(host + input.source.latencyNs);
-      await waitFor(() => output.heldNotes.isNotEmpty);
-      // Nothing dropped yet: the note stays.
-      bridge.refresh();
-      expect(output.heldNotes, hasLength(1));
-      output.releaseNotes();
-      await waitFor(() => sentWords().contains(_noteOff));
-      expect(output.heldNotes, isEmpty);
-    });
-
-    test(
-      'outputs track MIDI 2.0 notes and drop events of a gone port',
-      () async {
+      test('plays native UMP at its timestamp plus C, to the frame', () async {
         final bridge = await start();
         final input = await bridge.openInput(keys);
         final output = await loop(bridge, input);
         final tap = _fake.taps[keys.id]!;
-        // A MIDI 2.0 note on and off, and a controller that is no note.
-        callTap(tap, 1, [0x40903C00, 0x80000000], host);
-        callTap(tap, 1, [0x40B00700, 0x10000000], host);
-        await playPast(host + input.source.latencyNs);
-        await waitFor(() => output.sent == 2);
+        final at = host + 2000000;
+        callTap(tap, 1, [_noteOn], at);
+        final target = at + input.source.latencyNs;
+        await playPast(target);
+        await waitFor(() => _fake.sent.isNotEmpty);
+        expect(sentWords(), [_noteOn]);
+        final sentAt = bridge.clock.toEngineNs(_fake.sent.single.packet.time);
+        expect((sentAt - target).abs(), lessThan(30000));
+        expect(output.sent, 1);
         expect(output.heldNotes, hasLength(1));
-        callTap(tap, 1, [0x40803C00, 0x00000000], host);
-        await playPast(host + input.source.latencyNs);
-        await waitFor(() => output.sent == 3);
-        expect(output.heldNotes, isEmpty);
-        _fake.addPort(synth.copyWith(state: MidiPortState.offline));
-        await waitFor(() => output.isWaiting);
-        callTap(tap, 1, [_noteOn], host);
-        await playPast(host + input.source.latencyNs);
-        expect(output.sent, 3);
-        final again = _fake.addPort(
+        final stats = input.stats;
+        expect(stats.path, AudMidiPath.native);
+        expect(stats.source.delivered, 1);
+        expect(stats.source.late, 0);
+        expect(stats.adapter!.pushed, 1);
+        expect(stats.recentLatencyNs, isNotNull);
+        expect(input.stats.recentLatencyNs, isNull);
+        expect(stats.toJson()['path'], 'native');
+      });
+
+      test('feeds bytes on the Dart path with the MIDI time mapped', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(keys, path: AudMidiPath.dart);
+        expect(input.path, AudMidiPath.dart);
+        expect(_fake.taps, isEmpty);
+        await loop(bridge, input);
+        await waitFor(() => _fake.calls.contains('openPort ${keys.id}'));
+        final time = const MidiSystemClock().now();
+        _fake.inject(
+          keys.id,
+          MidiBytesPacket(bytes: MidiBytes([0x90, 60, 100]), time: time),
+        );
+        _fake.inject(
+          keys.id,
+          MidiUmpPacket(words: Uint32List.fromList([_noteOff]), time: time),
+        );
+        await waitFor(() => input.source.stats.pushed == 2);
+        await playPast(bridge.clock.toEngineNs(time) + input.source.latencyNs);
+        await waitFor(() => _fake.sent.length == 2);
+        expect(sentWords(), [_noteOn, _noteOff]);
+      });
+
+      test('immediate plays at the block that drains it', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(
+          keys,
+          timing: AudSourceTiming.immediate,
+        );
+        expect(input.source.latencyNs, 0);
+        await loop(bridge, input);
+        final blockStart = host;
+        callTap(_fake.taps[keys.id]!, 1, [_noteOn], host - 100000000);
+        await play(1);
+        await waitFor(() => _fake.sent.isNotEmpty);
+        final sentAt = bridge.clock.toEngineNs(_fake.sent.single.packet.time);
+        final outputAt = engine.timing.hostTimeAt(engine.timing.samplePosition);
+        expect((sentAt - outputAt).abs(), lessThan(30000));
+        expect(sentAt, greaterThanOrEqualTo(blockStart - 30000));
+      });
+
+      test('falls back to the Dart path when the tap is refused', () async {
+        final bridge = await start();
+        _fake.failWith(attachNativeTap: const MidiUnsupported('no taps'));
+        final input = await bridge.openInput(keys);
+        expect(input.path, AudMidiPath.dart);
+        await input.close();
+        await expectLater(
+          bridge.openInput(keys, path: AudMidiPath.native),
+          throwsA(isA<MidiUnsupported>()),
+        );
+      });
+
+      test(
+        'a forced native path needs a tap; a failed open leaves nothing',
+        () async {
+          await midi.close();
+          _fake = FakeMidiBackend(hasNativeTaps: false);
+          keys = _fake.addPort(
+            _fake.portInfo(
+              'keys',
+              direction: MidiDirection.input,
+              name: 'Keys',
+            ),
+          );
+          midi = await Midi.open(
+            options: const MidiOptions(backend: _backend, inIsolate: true),
+          );
+          final bridge = await start();
+          await expectLater(
+            bridge.openInput(keys, path: AudMidiPath.native),
+            throwsA(isA<MidiUnsupported>()),
+          );
+          expect(bridge.inputs, isEmpty);
+          expect(
+            engine.graph.nodes.where(
+              (n) => n.typeId == AudMidiInputNode.typeId,
+            ),
+            isEmpty,
+          );
+          final input = await bridge.openInput(keys);
+          expect(input.path, AudMidiPath.dart);
+        },
+      );
+
+      test('an input on a port that is offline waits for it', () async {
+        final bridge = await start();
+        final offline = _fake.addPort(
+          keys.copyWith(state: MidiPortState.offline),
+        );
+        await waitFor(() => bridge.inputPorts.single.state == offline.state);
+        final input = await bridge.openInput(offline);
+        expect(input.isWaiting, isTrue);
+        expect(input.path, isNull);
+        expect(_fake.taps, isEmpty);
+      });
+    });
+
+    group('openInput and openOutput', () {
+      test('names the nodes after the ports, uniquely', () async {
+        final bridge = await start();
+        final spaced = _fake.addPort(
           _fake.portInfo(
-            'synth-2',
-            direction: MidiDirection.output,
-            name: 'Synth',
-            protocol: MidiProtocol.midi2,
+            'x',
+            direction: MidiDirection.input,
+            name: ' Loop  out!',
           ),
         );
-        _fake.removePort(synth.id);
-        await waitFor(() => output.port.id == again.id);
-        expect(
-          engine.graph.stringsOf(output.node)[AudMidiPortNode.portId],
-          again.id.value,
+        final blank = _fake.addPort(
+          _fake.portInfo('y', direction: MidiDirection.input, name: '***'),
         );
-      },
-    );
+        final a = await bridge.openInput(spaced, path: AudMidiPath.dart);
+        final b = await bridge.openInput(spaced, path: AudMidiPath.dart);
+        final c = await bridge.openInput(blank, path: AudMidiPath.dart);
+        final out = await bridge.openOutput(synth);
+        expect(a.node.name, 'midi_in_loop_out');
+        expect(b.node.name, 'midi_in_loop_out_2');
+        expect(c.node.name, 'midi_in');
+        expect(out.node.name, 'midi_out_synth');
+      });
+    });
 
-    test('names the nodes after the ports, uniquely', () async {
-      final bridge = await start();
-      final spaced = _fake.addPort(
-        _fake.portInfo(
-          'x',
-          direction: MidiDirection.input,
-          name: ' Loop  out!',
-        ),
+    group('periodNs, baseLatencyNs and fixedLatencyNs', () {
+      test('a fixed latency before the first block comes from the format', () {
+        final bridge = AudMidiBridge(engine, midi);
+        final format = engine.format;
+        final frames = format.burstFrames > 0
+            ? format.burstFrames
+            : format.bufferFrames;
+        expect(bridge.periodNs, (frames * 1e9 / format.sampleRate).round());
+        expect(bridge.baseLatencyNs, bridge.periodNs);
+        expect(bridge.fixedLatencyNs, bridge.periodNs + 1000000);
+      });
+
+      test('takes P from the render gaps and m from the input', () async {
+        final bridge = await start(
+          options: const AudMidiBridgeOptions(marginSamples: 8),
+        );
+        // One gap of 6 ms among a few renders: P - the cap of m - is then the
+        // period of a device, not the gap of renders called back to back.
+        await play(10);
+        await Future<void>.delayed(const Duration(milliseconds: 6));
+        host = AudClock.nowNs();
+        await play(10);
+        final timing = engine.timing;
+        expect(bridge.periodNs, timing.periodPercentileNs(0.999));
+        expect(
+          bridge.baseLatencyNs,
+          bridge.periodNs + timing.outputLatencyNs.round(),
+        );
+        final input = await bridge.openInput(keys);
+        expect(input.marginNs, 1000000);
+        final tap = _fake.taps[keys.id]!;
+        // Eight events that took 3 ms from their timestamp to the source.
+        for (var i = 0; i < 8; i++) {
+          callTap(tap, 1, [_noteOn], AudClock.nowNs() - 3000000);
+        }
+        await play(4);
+        expect(input.source.stats.delivered, 8);
+        expect(input.marginNs, greaterThanOrEqualTo(3000000));
+        bridge.refresh();
+        expect(
+          input.source.latencyNs,
+          greaterThanOrEqualTo(bridge.baseLatencyNs + 3000000),
+        );
+        expect(input.stats.marginNs, input.marginNs);
+        expect(input.stats.toJson()['marginNs'], input.marginNs);
+        // A burst of late deliveries (a keyboard's port opening) raises m at
+        // most to one period, and m never shrinks.
+        final before = input.marginNs;
+        for (var i = 0; i < 40; i++) {
+          callTap(tap, 1, [_noteOff], AudClock.nowNs() - 900000000);
+        }
+        await play(4);
+        expect(input.marginNs, lessThan(100000000));
+        expect(input.marginNs, greaterThanOrEqualTo(before));
+      });
+    });
+
+    group('streamPeriodNs', () {
+      test('the period of a stream is its burst, else its buffer', () {
+        int period(double rate, int burst, int buffer) =>
+            AudMidiBridge.streamPeriodNs(
+              sampleRate: rate,
+              burstFrames: burst,
+              bufferFrames: buffer,
+            );
+        expect(period(48000, 192, 384), 4000000);
+        expect(period(48000, 0, 480), 10000000);
+        expect(period(0, 192, 384), 0);
+      });
+    });
+
+    group('refresh', () {
+      test('keeps the latency of the engine', () async {
+        final bridge = await start(
+          options: const AudMidiBridgeOptions(marginNs: 2000000),
+        );
+        final input = await bridge.openInput(keys);
+        final immediate = await bridge.openInput(
+          keys.copyWith(),
+          node: engine.graph.createNode(AudMidiInputNode.typeId),
+          timing: AudSourceTiming.immediate,
+          path: AudMidiPath.dart,
+        );
+        input.source.latencyNs = 1;
+        bridge.refresh();
+        expect(input.source.latencyNs, bridge.fixedLatencyNs);
+        // C follows P + L + m both ways, e.g. to a route of less latency.
+        input.source.latencyNs = input.source.latencyNs + 5000000;
+        bridge.refresh();
+        expect(input.source.latencyNs, bridge.fixedLatencyNs);
+        bridge.engineTimingChanged(engine);
+        expect(input.source.latencyNs, bridge.fixedLatencyNs);
+        expect(immediate.source.latencyNs, 0);
+      });
+
+      test('refreshes while the engine runs', () async {
+        final bridge = AudMidiBridge(
+          engine,
+          midi,
+          options: const AudMidiBridgeOptions(
+            refreshInterval: Duration(milliseconds: 5),
+          ),
+        );
+        engine.start();
+        await play(1);
+        final input = await bridge.openInput(keys);
+        input.source.latencyNs = 1;
+        await waitFor(() => input.source.latencyNs > 1);
+        engine.stop();
+        input.source.latencyNs = 1;
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+        expect(input.source.latencyNs, 1);
+        final running = AudMidiBridge(engine, midi);
+        engine.start();
+        await running.close();
+      });
+
+      test('dropped notifications release the notes of the outputs', () async {
+        engine.dispose();
+        engine = openEngine(
+          graphOptions: const AudGraphOptions(notificationCapacity: 4),
+        );
+        host = AudClock.nowNs();
+        final bridge = await start();
+        final input = await bridge.openInput(keys);
+        final output = await loop(bridge, input);
+        final tap = _fake.taps[keys.id]!;
+        // A chord of 32 notes in one block: more than the ring holds.
+        for (var note = 40; note < 72; note++) {
+          callTap(tap, 1, [0x20900064 | note << 8], host);
+        }
+        await playPast(host + input.source.latencyNs);
+        expect(engine.stats.notificationsDropped, greaterThan(0));
+        await waitFor(() => output.heldNotes.isNotEmpty);
+        bridge.refresh();
+        expect(output.heldNotes, isEmpty);
+        bridge.refresh();
+      });
+    });
+
+    group('close', () {
+      test('a bridge closes after its MIDI proxy closed', () async {
+        final bridge = await start();
+        await bridge.openInput(keys);
+        await midi.close();
+        await bridge.close();
+        expect(bridge.isClosed, isTrue);
+        expect(engine.extensions, isEmpty);
+      });
+
+      test('closes and leaves the engine; closed refuses', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(keys);
+        final output = await loop(bridge, input);
+        await bridge.close();
+        await bridge.close();
+        expect(bridge.isClosed, isTrue);
+        expect(engine.extensions, isEmpty);
+        expect(input.isClosed, isTrue);
+        expect(bridge.outputs, isEmpty);
+        expect(output.heldNotes, isEmpty);
+        expect(() => bridge.openInput(keys), throwsStateError);
+      });
+    });
+
+    group('engineDisposing', () {
+      test(
+        'the engine closes the bridge before it disposes the graph',
+        () async {
+          final bridge = await start();
+          final input = await bridge.openInput(keys);
+          final dart = await bridge.openInput(
+            keys.copyWith(),
+            node: engine.graph.createNode(AudMidiInputNode.typeId),
+            path: AudMidiPath.dart,
+          );
+          final tap = _fake.taps[keys.id]!;
+          engine.dispose();
+          expect(bridge.isClosed, isTrue);
+          expect(input.isClosed, isTrue);
+          expect(dart.isClosed, isTrue);
+          // The closed adapter takes calls until the tap detached.
+          callTap(tap, 1, [_noteOn], host);
+          await waitFor(() => _fake.taps.isEmpty);
+        },
       );
-      final blank = _fake.addPort(
-        _fake.portInfo('y', direction: MidiDirection.input, name: '***'),
+
+      test('the engine closes a bridge whose detach fails', () async {
+        final bridge = await start();
+        await bridge.openInput(keys);
+        _fake.failWith(detachNativeTap: MidiPortGone(keys.id));
+        engine.dispose();
+        await pumpEventQueue();
+        expect(bridge.isClosed, isTrue);
+      });
+
+      test('releases the notes of the outputs', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(keys);
+        final output = await loop(bridge, input);
+        callTap(_fake.taps[keys.id]!, 1, [_noteOn], host);
+        await playPast(host + input.source.latencyNs);
+        await waitFor(() => output.heldNotes.isNotEmpty);
+        engine.dispose();
+        expect(output.heldNotes, isEmpty);
+        expect(bridge.outputs, isEmpty);
+        await waitFor(() => sentWords().contains(_noteOff));
+      });
+    });
+  });
+
+  group('AudMidiInput', () {
+    group('isWaiting', () {
+      test('releases a held note when its port goes', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(keys);
+        await loop(bridge, input);
+        callTap(_fake.taps[keys.id]!, 1, [_noteOn], host);
+        await playPast(host + input.source.latencyNs);
+        await waitFor(() => _fake.sent.length == 1);
+        _fake.removePort(keys.id);
+        await waitFor(() => input.isWaiting);
+        await play(2);
+        await waitFor(() => _fake.sent.length >= 2);
+        // The graph closes the note with velocity 64.
+        expect(
+          sentWords().skip(1).map((w) => w & 0xFFFFFF00),
+          contains(_noteOff),
+        );
+        expect(input.stats.path, isNull);
+        expect(input.stats.adapter, isNull);
+      });
+
+      test(
+        'rebinds a re-plugged port by its fingerprint (ports-001)',
+        () async {
+          final bridge = await start();
+          final input = await bridge.openInput(keys);
+          _fake.removePort(keys.id);
+          await waitFor(() => input.isWaiting);
+          final replugged = _fake.addPort(
+            _fake.portInfo(
+              'keys-2',
+              direction: MidiDirection.input,
+              name: 'Keys',
+              serialNumber: 'K1',
+            ),
+          );
+          await waitFor(() => !input.isWaiting);
+          expect(input.port.id, replugged.id);
+          expect(_fake.taps.keys, [replugged.id]);
+          expect(
+            engine.graph.stringsOf(input.node)[AudMidiPortNode.portId],
+            replugged.id.value,
+          );
+        },
       );
-      final a = await bridge.openInput(spaced, path: AudMidiPath.dart);
-      final b = await bridge.openInput(spaced, path: AudMidiPath.dart);
-      final c = await bridge.openInput(blank, path: AudMidiPath.dart);
-      final out = await bridge.openOutput(synth);
-      expect(a.node.name, 'midi_in_loop_out');
-      expect(b.node.name, 'midi_in_loop_out_2');
-      expect(c.node.name, 'midi_in');
-      expect(out.node.name, 'midi_out_synth');
-    });
 
-    test('an input on a port that is offline waits for it', () async {
-      final bridge = await start();
-      final offline = _fake.addPort(
-        keys.copyWith(state: MidiPortState.offline),
+      test('a port that returns under its id plays again', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(keys, path: AudMidiPath.dart);
+        _fake.addPort(keys.copyWith(state: MidiPortState.offline));
+        await waitFor(() => input.isWaiting);
+        _fake.addPort(keys.copyWith(state: MidiPortState.connected));
+        await waitFor(() => !input.isWaiting);
+        expect(input.path, AudMidiPath.dart);
+      });
+
+      test(
+        'a port that goes offline under its tap makes the input wait',
+        () async {
+          final bridge = await start();
+          final input = await bridge.openInput(keys);
+          expect(input.path, AudMidiPath.native);
+          _fake.addPort(keys.copyWith(state: MidiPortState.offline));
+          await waitFor(() => input.isWaiting);
+          // CoreMIDI keeps the tap of an offline port: still native.
+          expect(input.path, AudMidiPath.native);
+          expect(_fake.taps.keys, [keys.id]);
+          _fake.addPort(keys.copyWith(state: MidiPortState.connected));
+          await waitFor(() => !input.isWaiting);
+          expect(input.path, AudMidiPath.native);
+        },
       );
-      await waitFor(() => bridge.inputPorts.single.state == offline.state);
-      final input = await bridge.openInput(offline);
-      expect(input.isWaiting, isTrue);
-      expect(input.path, isNull);
-      expect(_fake.taps, isEmpty);
     });
 
-    test('a send that fails leaves the output working', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      final output = await loop(bridge, input);
-      _fake.failWith(send: MidiPortGone(synth.id));
-      callTap(_fake.taps[keys.id]!, 1, [_noteOn], host);
-      await playPast(host + input.source.latencyNs);
-      await waitFor(() => output.sent == 1);
-      await pumpEventQueue();
-      _fake.failWith();
-      callTap(_fake.taps[keys.id]!, 1, [_noteOff], host);
-      await playPast(host + input.source.latencyNs);
-      await waitFor(() => _fake.sent.isNotEmpty);
-      expect(sentWords(), [_noteOff]);
+    group('retarget, setTiming and close', () {
+      test('retargets, changes the timing and closes', () async {
+        final bridge = await start();
+        final other = _fake.addPort(
+          _fake.portInfo('pads', direction: MidiDirection.input, name: 'Pads'),
+        );
+        final input = await bridge.openInput(keys);
+        await input.retarget(other);
+        expect(input.port.id, other.id);
+        expect(_fake.taps.keys, [other.id]);
+        await input.setTiming(AudSourceTiming.immediate);
+        await input.setTiming(AudSourceTiming.immediate);
+        expect(input.timing, AudSourceTiming.immediate);
+        expect(input.source.timing, AudSourceTiming.immediate);
+        await input.close();
+        await input.close();
+        expect(input.isClosed, isTrue);
+        expect(bridge.inputs, isEmpty);
+        expect(_fake.taps, isEmpty);
+        expect(
+          engine.graph.nodes.where((n) => n.typeId == AudMidiInputNode.typeId),
+          isEmpty,
+        );
+      });
     });
 
-    test('dropped notifications release the notes of the outputs', () async {
-      engine.dispose();
-      engine = openEngine(
-        graphOptions: const AudGraphOptions(notificationCapacity: 4),
+    group('marginNs', () {
+      test(
+        'a Bluetooth port starts at 15 ms of margin, capped at 30',
+        () async {
+          final bridge = await start(
+            options: const AudMidiBridgeOptions(marginSamples: 8),
+          );
+          final ble = _fake.addPort(
+            _fake.portInfo(
+              'ble',
+              direction: MidiDirection.input,
+              name: 'Keys BLE',
+              transport: MidiTransport.bluetoothLe,
+            ),
+          );
+          await waitFor(() => bridge.inputPorts.any((p) => p.id == ble.id));
+          final input = await bridge.openInput(ble);
+          expect(input.marginNs, 15000000);
+          expect(input.source.latencyNs, bridge.baseLatencyNs + 15000000);
+          final tap = _fake.taps[ble.id]!;
+          for (var i = 0; i < 10; i++) {
+            callTap(tap, 1, [_noteOn], AudClock.nowNs() - 200000000);
+          }
+          await play(60);
+          // The delay histogram ends at 25 ms, below the cap of 30 ms.
+          expect(input.marginNs, inInclusiveRange(25000000, 30000000));
+        },
       );
-      host = AudClock.nowNs();
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      final output = await loop(bridge, input);
-      final tap = _fake.taps[keys.id]!;
-      // A chord of 32 notes in one block: more than the ring holds.
-      for (var note = 40; note < 72; note++) {
-        callTap(tap, 1, [0x20900064 | note << 8], host);
-      }
-      await playPast(host + input.source.latencyNs);
-      expect(engine.stats.notificationsDropped, greaterThan(0));
-      await waitFor(() => output.heldNotes.isNotEmpty);
-      bridge.refresh();
-      expect(output.heldNotes, isEmpty);
-      bridge.refresh();
     });
+  });
 
-    test('closes and leaves the engine; closed refuses', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      final output = await loop(bridge, input);
-      await bridge.close();
-      await bridge.close();
-      expect(bridge.isClosed, isTrue);
-      expect(engine.extensions, isEmpty);
-      expect(input.isClosed, isTrue);
-      expect(bridge.outputs, isEmpty);
-      expect(output.heldNotes, isEmpty);
-      expect(() => bridge.openInput(keys), throwsStateError);
-    });
-
-    test('the engine closes the bridge before it disposes the graph', () async {
-      final bridge = await start();
-      final input = await bridge.openInput(keys);
-      final dart = await bridge.openInput(
-        keys.copyWith(),
-        node: engine.graph.createNode(AudMidiInputNode.typeId),
-        path: AudMidiPath.dart,
+  group('AudMidiOutput', () {
+    group('heldNotes', () {
+      test(
+        'outputs track MIDI 2.0 notes and drop events of a gone port',
+        () async {
+          final bridge = await start();
+          final input = await bridge.openInput(keys);
+          final output = await loop(bridge, input);
+          final tap = _fake.taps[keys.id]!;
+          // A MIDI 2.0 note on and off, and a controller that is no note.
+          callTap(tap, 1, [0x40903C00, 0x80000000], host);
+          callTap(tap, 1, [0x40B00700, 0x10000000], host);
+          await playPast(host + input.source.latencyNs);
+          await waitFor(() => output.sent == 2);
+          expect(output.heldNotes, hasLength(1));
+          callTap(tap, 1, [0x40803C00, 0x00000000], host);
+          await playPast(host + input.source.latencyNs);
+          await waitFor(() => output.sent == 3);
+          expect(output.heldNotes, isEmpty);
+          _fake.addPort(synth.copyWith(state: MidiPortState.offline));
+          await waitFor(() => output.isWaiting);
+          callTap(tap, 1, [_noteOn], host);
+          await playPast(host + input.source.latencyNs);
+          expect(output.sent, 3);
+          final again = _fake.addPort(
+            _fake.portInfo(
+              'synth-2',
+              direction: MidiDirection.output,
+              name: 'Synth',
+              protocol: MidiProtocol.midi2,
+            ),
+          );
+          _fake.removePort(synth.id);
+          await waitFor(() => output.port.id == again.id);
+          expect(
+            engine.graph.stringsOf(output.node)[AudMidiPortNode.portId],
+            again.id.value,
+          );
+        },
       );
-      final tap = _fake.taps[keys.id]!;
-      engine.dispose();
-      expect(bridge.isClosed, isTrue);
-      expect(input.isClosed, isTrue);
-      expect(dart.isClosed, isTrue);
-      // The closed adapter takes calls until the tap detached.
-      callTap(tap, 1, [_noteOn], host);
-      await waitFor(() => _fake.taps.isEmpty);
     });
 
-    test('the engine closes a bridge whose detach fails', () async {
-      final bridge = await start();
-      await bridge.openInput(keys);
-      _fake.failWith(detachNativeTap: StateError('gone'));
-      engine.dispose();
-      await pumpEventQueue();
-      expect(bridge.isClosed, isTrue);
+    group('releaseNotes', () {
+      test('outputs release their notes when notifications drop', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(keys);
+        final output = await loop(bridge, input);
+        callTap(_fake.taps[keys.id]!, 1, [_noteOn], host);
+        await playPast(host + input.source.latencyNs);
+        await waitFor(() => output.heldNotes.isNotEmpty);
+        // Nothing dropped yet: the note stays.
+        bridge.refresh();
+        expect(output.heldNotes, hasLength(1));
+        output.releaseNotes();
+        await waitFor(() => sentWords().contains(_noteOff));
+        expect(output.heldNotes, isEmpty);
+      });
+    });
+
+    group('sent', () {
+      test('a send that fails leaves the output working', () async {
+        final bridge = await start();
+        final input = await bridge.openInput(keys);
+        final output = await loop(bridge, input);
+        _fake.failWith(send: MidiPortGone(synth.id));
+        callTap(_fake.taps[keys.id]!, 1, [_noteOn], host);
+        await playPast(host + input.source.latencyNs);
+        await waitFor(() => output.sent == 1);
+        await pumpEventQueue();
+        _fake.failWith();
+        callTap(_fake.taps[keys.id]!, 1, [_noteOff], host);
+        await playPast(host + input.source.latencyNs);
+        await waitFor(() => _fake.sent.isNotEmpty);
+        expect(sentWords(), [_noteOff]);
+      });
     });
   });
 }

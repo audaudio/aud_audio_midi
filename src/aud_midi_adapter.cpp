@@ -97,11 +97,6 @@ bool isClock(uint32_t word0) {
          ((word0 >> 16) & 0xFF) == kClock;
 }
 
-bool isSysex(uint32_t word0) {
-  const uint32_t type = aud_ump_message_type(word0);
-  return type == AUD_UMP_TYPE_DATA64 || type == AUD_UMP_TYPE_DATA128;
-}
-
 uint32_t sysexStatus(uint32_t word0) { return (word0 >> 20) & 0xF; }
 
 bool sysexBegins(uint32_t status) {
@@ -127,7 +122,7 @@ void takeReset(AudMidiAdapter& a) AUD_MIDI_RT;
 int32_t emitFromParser(void* user, const uint32_t* words,
                        uint32_t count) AUD_MIDI_RT {
   AudMidiAdapter& a = *static_cast<AudMidiAdapter*>(user);
-  const bool sysex = isSysex(words[0]);
+  const bool sysex = aud_midi_is_sysex_word(words[0]);
   if ((sysex && sysexBegins(sysexStatus(words[0]))) || isClock(words[0])) {
     if (overHalfFull(a)) {
       a.droppedFill.fetch_add(1, std::memory_order_relaxed);
@@ -235,7 +230,7 @@ void passUmp(AudMidiAdapter& a, const uint32_t* words,
       a.malformed.fetch_add(1, std::memory_order_relaxed);
       return;
     }
-    if (isSysex(words[0])) {
+    if (aud_midi_is_sysex_word(words[0])) {
       passSysex(a, words, n);
     } else if (isClock(words[0]) && overHalfFull(a)) {
       a.droppedFill.fetch_add(1, std::memory_order_relaxed);
@@ -275,8 +270,9 @@ AUD_EXPORT void aud_audio_midi_adapter_close(AudMidiAdapter* adapter) {
   while (adapter->inFlight.load(std::memory_order_seq_cst) > 0) {
     if (std::chrono::steady_clock::now() - start > kCloseTimeout) {
       std::fprintf(stderr,
-                   "aud_audio_midi: a tap call did not return within 2 s; "
-                   "the adapter is closed anyway\n");
+                   "aud_audio_midi: a tap call did not return within %lld s; "
+                   "the adapter is closed anyway\n",
+                   static_cast<long long>(kCloseTimeout.count()));
       return;
     }
     std::this_thread::yield();

@@ -10,6 +10,10 @@ import 'package:ffi/ffi.dart';
 
 import 'aud_audio_midi_bindings_generated.dart' as bindings;
 
+/// The bytes of the buffer an adapter starts with; it grows to the largest
+/// push.
+const _initialBufferBytes = 4096;
+
 // #############################################################################
 /// The tap adapter of a port (contract C3 of ticket 26): it turns the MIDI
 /// of an aud_midi port - UMP words or MIDI 1.0 bytes - into UMP packets and
@@ -65,7 +69,7 @@ class AudMidiAdapter {
         'and the group must be 0 to 15',
       );
     }
-    _buffer = calloc<Uint8>(_bufferBytes);
+    _buffer = calloc<Uint8>(_initialBufferBytes);
   }
 
   // ...........................................................................
@@ -73,13 +77,13 @@ class AudMidiAdapter {
   /// their arrival time in host ns.
   void pushUmp(List<int> words, {required int hostTimeNs}) {
     _checkAlive();
-    final bytes = _reserve(words.length * 4);
+    _reserve(words.length * 4);
     _buffer.cast<Uint32>().asTypedList(words.length).setAll(0, words);
     bindings.aud_audio_midi_tap(
       _pointer.cast(),
       bindings.AUD_MIDI_TAP_UMP,
       _buffer.cast(),
-      bytes ~/ 4,
+      words.length,
       hostTimeNs,
     );
   }
@@ -174,21 +178,19 @@ class AudMidiAdapter {
   // ...........................................................................
   Pointer<bindings.AudMidiAdapter> _pointer = nullptr;
   Pointer<Uint8> _buffer = nullptr;
-  int _bufferBytes = 4096;
+  int _bufferBytes = _initialBufferBytes;
   bool _closed = false;
 
   void _checkAlive() {
     if (isDisposed) throw StateError('The adapter is disposed');
   }
 
-  // Makes the buffer hold `bytes`; returns the bytes.
-  int _reserve(int bytes) {
-    if (bytes > _bufferBytes) {
-      calloc.free(_buffer);
-      _bufferBytes = bytes;
-      _buffer = calloc<Uint8>(bytes);
-    }
-    return bytes;
+  /// Makes the buffer hold [bytes].
+  void _reserve(int bytes) {
+    if (bytes <= _bufferBytes) return;
+    calloc.free(_buffer);
+    _bufferBytes = bytes;
+    _buffer = calloc<Uint8>(bytes);
   }
 }
 

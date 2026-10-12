@@ -4,8 +4,8 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
-// Checks the notices convention of decision license-001 in a repo (see
-// doc/guides/notices-guide.md):
+// Checks the notices convention of decision license-001 in a repo, as the
+// NOTICES.md in its root describes it:
 //
 // - every component directory under src/third_party has a row in
 //   src/third_party/NOTICES.md whose Path column names it,

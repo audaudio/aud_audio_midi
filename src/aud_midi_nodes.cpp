@@ -16,6 +16,7 @@
 #include <string>
 
 #include "aud_audio_midi.h"
+#include "aud_midi_parser.h"
 #include "aud_ump.h"
 
 namespace {
@@ -58,9 +59,7 @@ void setParam(void* instance, uint32_t index, float value) {
 }
 
 bool isSysex(const AudEvent& event) {
-  if (event.type != AUD_EVENT_UMP) return false;
-  const uint32_t type = aud_ump_message_type(event.words[0]);
-  return type == AUD_UMP_TYPE_DATA64 || type == AUD_UMP_TYPE_DATA128;
+  return event.type == AUD_EVENT_UMP && aud_midi_is_sysex_word(event.words[0]);
 }
 
 // [realtime] Passes every event through at its offset; a parameter event

@@ -37,6 +37,8 @@
 
 #include <stdint.h>
 
+#include "aud_ump.h"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -48,6 +50,13 @@ enum {
   AUD_MIDI_SYSEX_CONTINUE = 2,
   AUD_MIDI_SYSEX_END = 3,
 };
+
+// Whether the packet that starts with `word0` is a SysEx: a 64-bit data
+// message (SysEx7) or a 128-bit one (SysEx8).
+static inline int aud_midi_is_sysex_word(uint32_t word0) {
+  const uint32_t type = aud_ump_message_type(word0);
+  return type == AUD_UMP_TYPE_DATA64 || type == AUD_UMP_TYPE_DATA128;
+}
 
 // The sink of the parser: one packet of `count` words. Returns nonzero when
 // it took the packet; a refused SysEx packet drops the rest of its SysEx,

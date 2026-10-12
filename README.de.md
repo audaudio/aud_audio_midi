@@ -183,6 +183,48 @@ void feed(int source, int push, int release, int size) {
   des Adapters und die Zeit vom Eingang zum Ausgang der Events seit dem
   letzten Lesen.
 
+### Die API der Brücke
+
+- `AudMidiBridgeOptions`, übergeben an `AudMidiBridge(engine, midi,
+  options:)`: `timing` ist das Timing neuer Eingänge (`fixed`);
+  `preferNative` nimmt den nativen Tap, wo das Backend einen anbietet
+  (true); `capacity` sind die Events, die eine Quelle hält (4096);
+  `maxSysexBytes` das längste SysEx, das ein Eingang weitergibt (64 KiB);
+  `refreshInterval`, wie oft die Brücke auf das Timing der Engine schaut,
+  während sie läuft (1 s). Die Marge m: `marginNs` ist das kleinste m
+  (1 ms), `marginSamples` die gelieferten Events, nach denen ein Eingang
+  sein eigenes 99,9. Perzentil der Lieferverzögerung als m nimmt (1000).
+  Ein Bluetooth-LE-Port beginnt bei `bluetoothMarginNs` (15 ms, ein
+  Verbindungsintervall, da BLE MIDI die Zeitstempel des Senders trägt)
+  und kalibriert sich bis `bluetoothMarginCapNs` (30 ms); seltenere,
+  längere Verzögerungen spielen verspätet.
+- `AudMidiPath`: `native` - das Backend ruft den Adapter auf seinem
+  Empfangs-Thread - oder `dart` - die Brücke empfängt die Pakete in Dart
+  und schiebt sie über FFI. `openInput(port, path:)` erzwingt einen:
+  `native` wirft eine `MidiException`, wenn das Backend keinen Tap hat,
+  statt zurückzufallen, `dart` hängt nie einen Tap an. Ohne `path` nimmt
+  der Eingang den nativen Weg, wo er angeboten wird und `preferNative`
+  an ist. `AudMidiInput.path` ist der Weg in Gebrauch, null, solange der
+  Port weg ist.
+- `AudMidiInput.setTiming(timing)` legt die Quelle neu an: Der Erzeuger
+  löst sich, die Quelle geht und eine neue mit dem neuen Timing tritt an
+  ihre Stelle, der Erzeuger hängt sich wieder an. Der Knoten und seine
+  Verbindungen bleiben; die Statistik der Quelle und die gemessene Marge
+  beginnen von vorn.
+- `AudMidiOutput.sent` zählt die Pakete, die der Ausgang gesendet hat;
+  `heldNotes` sind die Noten, die auf dem Port klingen, jede als
+  `group << 12 | channel << 8 | note`; `releaseNotes()` sendet für jede
+  ein Note-Off. Die Brücke ruft es, wenn der Graph Benachrichtigungen
+  verworfen hat, wenn der Ausgang schließt und wenn die Engine freigibt.
+- `AudMidiBridge.fixedLatencyNs` ist C mit der kleinsten Marge,
+  `baseLatencyNs + marginNs`, die Latenz eines neuen festen Eingangs auf
+  einem Port, der nicht Bluetooth ist; `periodNs` und `baseLatencyNs`
+  sind P und P + L.
+  `AudMidiBridge.streamPeriodNs(sampleRate:, burstFrames:, bufferFrames:)`
+  ist die Periode eines Streams: sein Burst, sonst sein Puffer, bei der
+  Abtastrate, und 0 ohne Rate - was `periodNs` vor dem ersten Rendern
+  ist.
+
 ### Die Knoten
 
 - `aud.midi.input` und `aud.midi.output` haben keine Audio-Busse, den

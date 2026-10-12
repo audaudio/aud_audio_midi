@@ -138,7 +138,7 @@ class AudMidiBridge extends AudEngineExtension {
   List<AudMidiInput> get inputs => List.unmodifiable(_inputs);
 
   /// The open outputs.
-  List<AudMidiOutput> get outputs => List.unmodifiable(_outputs);
+  List<AudMidiOutput> get outputs => List.unmodifiable(_outputs.values);
 
   /// P of midi-003: the 99.9th percentile of the gaps between two renders
   /// since the last reset of the time filter; before there are any, the
@@ -235,7 +235,7 @@ class AudMidiBridge extends AudEngineExtension {
       node == null,
     );
     graph.transaction((tx) => tx.connectEvents(output.node, graph.io));
-    _outputs.add(output);
+    _outputs[output.node.handle] = output;
     return output;
   }
 
@@ -247,16 +247,11 @@ class AudMidiBridge extends AudEngineExtension {
   /// runs.
   void refresh() {
     if (_isClosed) return;
-    final base = baseLatencyNs;
-    for (final input in _inputs) {
-      input._setLatency(base + input.marginNs);
-    }
+    _applyLatencies();
     final dropped = engine.stats.notificationsDropped;
     if (dropped > _notificationsDropped) {
       _notificationsDropped = dropped;
-      for (final output in _outputs) {
-        output.releaseNotes();
-      }
+      _releaseNotes();
     }
   }
 
@@ -271,7 +266,7 @@ class AudMidiBridge extends AudEngineExtension {
     for (final input in List.of(_inputs)) {
       await input.close();
     }
-    for (final output in List.of(_outputs)) {
+    for (final output in List.of(_outputs.values)) {
       await output.close();
     }
     engine.removeExtension(this);
@@ -288,16 +283,11 @@ class AudMidiBridge extends AudEngineExtension {
   }
 
   @override
-  void engineTimingChanged(AudEngine engine) {
-    final base = baseLatencyNs;
-    for (final input in _inputs) {
-      input._setLatency(base + input.marginNs);
-    }
-  }
+  void engineTimingChanged(AudEngine engine) => _applyLatencies();
 
   /// Stops every producer before the graph frees the sources: the adapters
   /// close synchronously, so no tap touches a source afterwards; the taps
-  /// detach in the background.
+  /// detach in the background. The outputs release the notes they hold.
   @override
   void engineDisposing(AudEngine engine) {
     _isClosed = true;
@@ -308,6 +298,7 @@ class AudMidiBridge extends AudEngineExtension {
       input._disposeSync();
     }
     _inputs.clear();
+    _releaseNotes();
     _outputs.clear();
   }
 
@@ -316,7 +307,9 @@ class AudMidiBridge extends AudEngineExtension {
   // ######################
 
   final List<AudMidiInput> _inputs = [];
-  final List<AudMidiOutput> _outputs = [];
+
+  /// The outputs by the handle of their node.
+  final Map<int, AudMidiOutput> _outputs = {};
   late final StreamSubscription<MidiPortEvent> _changes;
   late final StreamSubscription<AudGraphNotification> _notifications;
   Timer? _refresh;
@@ -326,6 +319,28 @@ class AudMidiBridge extends AudEngineExtension {
 
   void _checkOpen() {
     if (_isClosed) throw StateError('The MIDI bridge is closed');
+  }
+
+  /// Sets the latency of the fixed inputs to the current P + L + m.
+  void _applyLatencies() {
+    final base = baseLatencyNs;
+    for (final input in _inputs) {
+      input._setLatency(base + input.marginNs);
+    }
+  }
+
+  /// Lets every output release the notes it holds.
+  void _releaseNotes() {
+    for (final output in _outputs.values) {
+      output.releaseNotes();
+    }
+  }
+
+  /// Writes the id and the fingerprint of [port] to the strings of [node].
+  void _writeStrings(AudNode node, MidiPortInfo port) {
+    engine.graph
+      ..setString(node, AudMidiPortNode.portId, port.id.value)
+      ..setString(node, AudMidiPortNode.portFingerprint, port.fingerprint);
   }
 
   /// Commits [node], which may come from a transaction still open.
@@ -368,19 +383,14 @@ class AudMidiBridge extends AudEngineExtension {
     for (final input in List.of(_inputs)) {
       input._onPortEvent(event);
     }
-    for (final output in _outputs) {
+    for (final output in _outputs.values) {
       output._onPortEvent(event);
     }
   }
 
   void _onNotification(AudGraphNotification notification) {
     if (notification is! AudEventNotification) return;
-    for (final output in _outputs) {
-      if (output.node.handle == notification.node) {
-        output._send(notification);
-        return;
-      }
-    }
+    _outputs[notification.node]?._send(notification);
   }
 }
 
@@ -478,26 +488,6 @@ class AudMidiInput {
   /// never shrinks for the life of the source.
   int get marginNs => _marginOf(_source.stats);
 
-  /// The smallest m of the port's transport.
-  int _floorNs() => _port.transport == MidiTransport.bluetoothLe
-      ? bridge.options.bluetoothMarginNs
-      : bridge.options.marginNs;
-
-  int _marginOf(AudEventSourceStats stats) {
-    final options = bridge.options;
-    final bluetooth = _port.transport == MidiTransport.bluetoothLe;
-    final floor = _floorNs();
-    final cap = bluetooth
-        ? options.bluetoothMarginCapNs
-        : math.max(options.marginNs, bridge.periodNs);
-    if (stats.delivered >= options.marginSamples) {
-      final measured = stats.delayPercentileNs(0.999) ?? 0;
-      final capped = math.min(measured, cap);
-      if (capped > _margin) _margin = capped;
-    }
-    return math.max(floor, _margin);
-  }
-
   /// The statistics; [AudMidiInputStats.recentLatencyNs] covers the events
   /// since the last read.
   AudMidiInputStats get stats {
@@ -523,7 +513,7 @@ class AudMidiInput {
     await _detachProducer();
     _port = port;
     _gone = false;
-    _writeStrings();
+    bridge._writeStrings(node, _port);
     await _attachProducer();
   });
 
@@ -577,6 +567,28 @@ class AudMidiInput {
     return result;
   }
 
+  /// The smallest m of the port's transport.
+  int _floorNs() => _port.transport == MidiTransport.bluetoothLe
+      ? bridge.options.bluetoothMarginNs
+      : bridge.options.marginNs;
+
+  /// m of [marginNs] for [stats]; raises the measured margin, which never
+  /// shrinks.
+  int _marginOf(AudEventSourceStats stats) {
+    final options = bridge.options;
+    final bluetooth = _port.transport == MidiTransport.bluetoothLe;
+    final floor = _floorNs();
+    final cap = bluetooth
+        ? options.bluetoothMarginCapNs
+        : math.max(options.marginNs, bridge.periodNs);
+    if (stats.delivered >= options.marginSamples) {
+      final measured = stats.delayPercentileNs(0.999) ?? 0;
+      final capped = math.min(measured, cap);
+      if (capped > _margin) _margin = capped;
+    }
+    return math.max(floor, _margin);
+  }
+
   /// Removes what [_open] created after it failed: the source and, when the
   /// bridge created it, the node.
   Future<void> _discard() async {
@@ -588,7 +600,7 @@ class AudMidiInput {
   }
 
   Future<void> _open() => _serial(() async {
-    _writeStrings();
+    bridge._writeStrings(node, _port);
     _source = _createSource();
     _hasSource = true;
     await _attachProducer();
@@ -604,13 +616,6 @@ class AudMidiInput {
             capacity: bridge.options.capacity,
           )
           as AudEventSourceFfi;
-
-  void _writeStrings() {
-    final graph = bridge.engine.graph;
-    graph
-      ..setString(node, AudMidiPortNode.portId, _port.id.value)
-      ..setString(node, AudMidiPortNode.portFingerprint, _port.fingerprint);
-  }
 
   /// Attaches a producer when the port is there: the native tap where the
   /// backend offers it, else the Dart path.
@@ -792,10 +797,7 @@ class AudMidiInput {
 /// An output port bound to an `aud.midi.output` node.
 class AudMidiOutput {
   AudMidiOutput._(this.bridge, this.node, this._port, this._ownsNode) {
-    final graph = bridge.engine.graph;
-    graph
-      ..setString(node, AudMidiPortNode.portId, _port.id.value)
-      ..setString(node, AudMidiPortNode.portFingerprint, _port.fingerprint);
+    bridge._writeStrings(node, _port);
   }
 
   /// The bridge.
@@ -821,11 +823,12 @@ class AudMidiOutput {
   void releaseNotes() {
     final output = bridge.midi.output(_port.id);
     for (final key in _held) {
-      final word =
-          0x20000000 |
-          ((key >> 12) & 0xF) << 24 |
-          (0x80 | (key >> 8) & 0xF) << 16 |
-          (key & 0x7F) << 8;
+      final word = AudUmp.midi1Word(
+        group: (key >> 12) & 0xF,
+        statusByte: (AudUmp.statusNoteOff << 4) | ((key >> 8) & 0xF),
+        data1: key & 0x7F,
+        data2: 0,
+      );
       unawaited(_guard(output?.sendUmp([word])));
     }
     _held.clear();
@@ -835,7 +838,7 @@ class AudMidiOutput {
   /// it.
   Future<void> close() async {
     releaseNotes();
-    bridge._outputs.remove(this);
+    bridge._outputs.remove(node.handle);
     if (_ownsNode) {
       bridge.engine.graph.transaction((tx) => tx.remove(node));
     }
@@ -862,11 +865,7 @@ class AudMidiOutput {
         info.direction == MidiDirection.output &&
         info.fingerprint == _port.fingerprint) {
       _port = info;
-      bridge.engine.graph.setString(
-        node,
-        AudMidiPortNode.portId,
-        info.id.value,
-      );
+      bridge._writeStrings(node, _port);
     }
   }
 
@@ -889,21 +888,18 @@ class AudMidiOutput {
     unawaited(_guard(bridge.midi.output(_port.id)?.sendUmp(words, at: at)));
   }
 
+  /// Keeps [heldNotes] up to date with a note on or off in [words].
   void _track(List<int> words) {
     final word0 = words[0];
-    final type = word0 >> 28;
-    if (type != 2 && type != 4) return;
-    final status = (word0 >> 20) & 0xF;
+    if (!AudUmp.isChannelVoice(word0)) return;
+    final word1 = words.length > 1 ? words[1] : 0;
     final key =
-        ((word0 >> 24) & 0xF) << 12 |
-        ((word0 >> 16) & 0xF) << 8 |
-        ((word0 >> 8) & 0x7F);
-    final velocity = type == 2
-        ? word0 & 0x7F
-        : (words.length > 1 ? words[1] >> 16 : 0);
-    if (status == 0x9 && velocity > 0) {
+        AudUmp.group(word0) << 12 |
+        AudUmp.channel(word0) << 8 |
+        AudUmp.note(word0);
+    if (AudUmp.isNoteOn(word0, word1)) {
       _held.add(key);
-    } else if (status == 0x8 || status == 0x9) {
+    } else if (AudUmp.isNoteOff(word0, word1)) {
       _held.remove(key);
     }
   }
