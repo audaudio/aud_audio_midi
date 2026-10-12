@@ -32,6 +32,7 @@ class AudMidiBridgeOptions {
   const AudMidiBridgeOptions({
     this.timing = AudSourceTiming.fixed,
     this.marginNs = 1000000,
+    this.marginSamples = 1000,
     this.preferNative = true,
     this.capacity = 4096,
     this.maxSysexBytes = 65536,
@@ -41,8 +42,13 @@ class AudMidiBridgeOptions {
   /// The timing of new inputs (midi-003).
   final AudSourceTiming timing;
 
-  /// m of midi-003: the margin of the fixed latency in nanoseconds.
+  /// The smallest m of midi-003: the margin of the fixed latency in
+  /// nanoseconds.
   final int marginNs;
+
+  /// The events after which an input takes its own 99.9th percentile of
+  /// the delivery delay as m, when it is larger than [marginNs].
+  final int marginSamples;
 
   /// Whether inputs take the native path where the backend offers it.
   final bool preferNative;
@@ -124,21 +130,45 @@ class AudMidiBridge extends AudEngineExtension {
   /// The open outputs.
   List<AudMidiOutput> get outputs => List.unmodifiable(_outputs);
 
-  /// C of midi-003 for the engine's timing: the longest period between two
-  /// renders, at least the stream's buffer period, plus the reported output
-  /// latency plus the margin. Before the first block the buffer period
-  /// stands in alone. (The graph's nominal period is its prepared largest
-  /// block, which a stream may never deliver.)
-  int get fixedLatencyNs {
-    final format = engine.format;
-    final buffer = format.sampleRate <= 0
-        ? 0
-        : (format.bufferFrames * 1e9 / format.sampleRate).round();
+  /// P of midi-003: the 99.9th percentile of the gaps between two renders
+  /// since the last reset of the time filter; before there are any, the
+  /// stream's period (its burst, else its buffer). The longest gap and the
+  /// graph's prepared largest block would let one outlier set the latency.
+  int get periodNs {
     final timing = engine.timing;
-    if (!timing.valid) return buffer + options.marginNs;
-    final period = math.max(timing.maxPeriodNs, buffer);
-    return period + timing.outputLatencyNs.round() + options.marginNs;
+    final percentile = timing.valid ? timing.periodPercentileNs(0.999) : null;
+    if (percentile != null) return percentile;
+    final format = engine.format;
+    return streamPeriodNs(
+      sampleRate: format.sampleRate,
+      burstFrames: format.burstFrames,
+      bufferFrames: format.bufferFrames,
+    );
   }
+
+  /// The period of a stream in nanoseconds: its burst, else its buffer, at
+  /// [sampleRate]; 0 without a rate.
+  static int streamPeriodNs({
+    required double sampleRate,
+    required int burstFrames,
+    required int bufferFrames,
+  }) {
+    if (sampleRate <= 0) return 0;
+    final frames = burstFrames > 0 ? burstFrames : bufferFrames;
+    return (frames * 1e9 / sampleRate).round();
+  }
+
+  /// P plus L of midi-003: the period plus the output latency the stream
+  /// reported with the last block.
+  int get baseLatencyNs {
+    final timing = engine.timing;
+    final output = timing.valid ? timing.outputLatencyNs.round() : 0;
+    return periodNs + output;
+  }
+
+  /// C of midi-003 with the smallest margin; an input's own margin may be
+  /// larger ([AudMidiInput.marginNs]).
+  int get fixedLatencyNs => baseLatencyNs + options.marginNs;
 
   // ...........................................................................
   /// Opens [port] as an input: an `aud.midi.input` node - [node] when the
@@ -201,9 +231,9 @@ class AudMidiBridge extends AudEngineExtension {
   /// runs.
   void refresh() {
     if (_isClosed) return;
-    final latency = fixedLatencyNs;
+    final base = baseLatencyNs;
     for (final input in _inputs) {
-      input._raiseLatency(latency);
+      input._raiseLatency(base + input.marginNs);
     }
     final dropped = engine.stats.notificationsDropped;
     if (dropped > _notificationsDropped) {
@@ -243,9 +273,9 @@ class AudMidiBridge extends AudEngineExtension {
 
   @override
   void engineTimingChanged(AudEngine engine) {
-    final latency = fixedLatencyNs;
+    final base = baseLatencyNs;
     for (final input in _inputs) {
-      input._setLatency(latency);
+      input._setLatency(base + input.marginNs);
     }
   }
 
@@ -346,6 +376,7 @@ class AudMidiInputStats {
     required this.path,
     required this.timing,
     required this.latencyNs,
+    required this.marginNs,
     required this.source,
     required this.adapter,
     required this.recentLatencyNs,
@@ -359,6 +390,9 @@ class AudMidiInputStats {
 
   /// C of the fixed timing in nanoseconds.
   final int latencyNs;
+
+  /// m of midi-003 for the input in nanoseconds.
+  final int marginNs;
 
   /// The statistics of the source: delivered, late, delays, latencies.
   final AudEventSourceStats source;
@@ -376,6 +410,7 @@ class AudMidiInputStats {
     'path': path?.name,
     'timing': timing.name,
     'latencyNs': latencyNs,
+    'marginNs': marginNs,
     'recentLatencyNs': recentLatencyNs,
     'source': source.toJson(),
     'adapter': adapter?.toJson(),
@@ -418,6 +453,17 @@ class AudMidiInput {
   /// The source of the node.
   AudEventSource get source => _source;
 
+  /// m of midi-003 for this input: the bridge's smallest margin, or the
+  /// input's own 99.9th percentile of the delivery delay once
+  /// [AudMidiBridgeOptions.marginSamples] events measured it, whichever is
+  /// larger.
+  int get marginNs {
+    final options = bridge.options;
+    final stats = _source.stats;
+    if (stats.delivered < options.marginSamples) return options.marginNs;
+    return math.max(options.marginNs, stats.delayPercentileNs(0.999) ?? 0);
+  }
+
   /// The statistics; [AudMidiInputStats.recentLatencyNs] covers the events
   /// since the last read.
   AudMidiInputStats get stats {
@@ -429,6 +475,7 @@ class AudMidiInput {
       path: _path,
       timing: _timing,
       latencyNs: _source.latencyNs,
+      marginNs: marginNs,
       source: stats,
       adapter: _adapter?.stats,
       recentLatencyNs: _recentMedianNs(previous, histogram),

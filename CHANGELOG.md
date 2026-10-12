@@ -17,11 +17,22 @@
 - Add the MIDI bridge between engines and aud_midi ports
 
 - AudMidiBridge, an extension of the engine: inputs and outputs by port id, the native tap or the Dart path, the fixed or immediate timing with C from the engine's timing (midi-003)
+
 - Hot-plug: a port that goes releases its notes, one that returns plays again, on Android by its fingerprint (ports-001)
+
 - Outputs leave through aud_midi at the time their frame reaches the audio output; dropped notifications release their notes
+
 - AudMidiClock maps aud_midi's time to the engine's host time; statistics per input with the recent input to output time
+
 - A SysEx cut after some of its packets left ends with an end packet; sysexCut and sysexTorn count them
+
 - aud_audio, aud_midi, aud_midi_core and aud_midi_standard as dependencies; the nodes are named after their ports
+
+- Add percentile periods and margins per input
+
+- P is the 99.9th percentile of the render gaps, the stream's burst or buffer before there are any (midi-003)
+- m is at least the bridge's margin and the input's own 99.9th percentile of the delivery delay after 1000 events; C only grows between resets
+- AudMidiBridge.periodNs, baseLatencyNs, streamPeriodNs; AudMidiInput.marginNs; the margin in the statistics
 
 ## 0.0.2 - 2026-10-08
 

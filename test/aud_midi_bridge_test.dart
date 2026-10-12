@@ -349,10 +349,54 @@ void main() {
     test('a fixed latency before the first block comes from the format', () {
       final bridge = AudMidiBridge(engine, midi);
       final format = engine.format;
-      expect(
-        bridge.fixedLatencyNs,
-        (format.bufferFrames * 1e9 / format.sampleRate).round() + 1000000,
+      final frames = format.burstFrames > 0
+          ? format.burstFrames
+          : format.bufferFrames;
+      expect(bridge.periodNs, (frames * 1e9 / format.sampleRate).round());
+      expect(bridge.baseLatencyNs, bridge.periodNs);
+      expect(bridge.fixedLatencyNs, bridge.periodNs + 1000000);
+    });
+
+    test('the period of a stream is its burst, else its buffer', () {
+      int period(double rate, int burst, int buffer) =>
+          AudMidiBridge.streamPeriodNs(
+            sampleRate: rate,
+            burstFrames: burst,
+            bufferFrames: buffer,
+          );
+      expect(period(48000, 192, 384), 4000000);
+      expect(period(48000, 0, 480), 10000000);
+      expect(period(0, 192, 384), 0);
+    });
+
+    test('takes P from the render gaps and m from the input', () async {
+      final bridge = await start(
+        options: const AudMidiBridgeOptions(marginSamples: 8),
       );
+      await play(20);
+      final timing = engine.timing;
+      expect(bridge.periodNs, timing.periodPercentileNs(0.999));
+      expect(
+        bridge.baseLatencyNs,
+        bridge.periodNs + timing.outputLatencyNs.round(),
+      );
+      final input = await bridge.openInput(keys);
+      expect(input.marginNs, 1000000);
+      final tap = _fake.taps[keys.id]!;
+      // Eight events that took 3 ms from their timestamp to the source.
+      for (var i = 0; i < 8; i++) {
+        callTap(tap, 1, [_noteOn], AudClock.nowNs() - 3000000);
+      }
+      await play(4);
+      expect(input.source.stats.delivered, 8);
+      expect(input.marginNs, greaterThanOrEqualTo(3000000));
+      bridge.refresh();
+      expect(
+        input.source.latencyNs,
+        greaterThanOrEqualTo(bridge.baseLatencyNs + 3000000),
+      );
+      expect(input.stats.marginNs, input.marginNs);
+      expect(input.stats.toJson()['marginNs'], input.marginNs);
     });
 
     test('refreshes while the engine runs', () async {
