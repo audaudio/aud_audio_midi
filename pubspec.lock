@@ -36,10 +36,12 @@ packages:
   aud_audio:
     dependency: "direct main"
     description:
-      path: "../aud_audio"
-      relative: true
-    source: path
-    version: "0.4.0"
+      path: "."
+      resolved-ref: "0fd3d0e082b0f678ec6348ace543c9e3962fddde"
+      tag-pattern: "{{version}}"
+      url: "git@github.com:audaudio/aud_audio.git"
+    source: git
+    version: "0.4.1"
   aud_audio_core:
     dependency: "direct main"
     description:
@@ -79,10 +81,11 @@ packages:
   aud_midi:
     dependency: "direct main"
     description:
-      path: "../aud_midi"
-      relative: true
-    source: path
-    version: "0.1.1"
+      name: aud_midi
+      sha256: "0081a8acf42f43082d3a2a7f96592677186552142c58bb584cb63c828aa4bdad"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
   aud_midi_android:
     dependency: transitive
     description:
