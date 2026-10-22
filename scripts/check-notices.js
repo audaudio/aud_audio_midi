@@ -21,7 +21,7 @@
 'use strict';
 
 const { existsSync, readdirSync, readFileSync, statSync } = require('node:fs');
-const { join, relative } = require('node:path');
+const { join, relative, sep } = require('node:path');
 
 const permissive = [
   'MIT',
@@ -103,7 +103,7 @@ function checkNotices(repoDir) {
       if (!sourceExtensions.some((ext) => file.endsWith(ext))) continue;
       const head = readFileSync(file, 'utf-8').slice(0, 400);
       if (!head.includes('@license')) {
-        problems.push(`${relative(repoDir, file)} has no license header`);
+        problems.push(`${relative(repoDir, file).split(sep).join('/')} has no license header`);
       }
     }
   }
