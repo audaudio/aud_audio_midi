@@ -8,8 +8,11 @@
 // port's event source, and aud.midi.output, whose outlet the bridge
 // connects to the graph's event input. Both pass the events of their inlet
 // through to their outlet at their offset; the output node drops SysEx
-// unless its parameter says otherwise. The process calls allocate nothing
-// and take no lock; the strings live on the control thread.
+// unless its parameter says otherwise. They declare
+// AUD_NODE_CAP_PASSES_EVENTS (ticket 37): the nodes behind them close the
+// notes they hand on, the engine those they hand out of the graph, once
+// each. The process calls allocate nothing and take no lock; the strings
+// live on the control thread.
 
 #include <cstring>
 #include <new>
@@ -127,10 +130,10 @@ const AudNodeVTable kVTable = {
     process,               setString, nullptr, nullptr, nullptr, nullptr,
 };
 
-constexpr uint32_t kCapabilities = AUD_NODE_CAP_VARIABLE_BLOCK |
-                                   AUD_NODE_CAP_EVENTS |
-                                   AUD_NODE_CAP_EVENT_OUTPUT |
-                                   AUD_NODE_CAP_STRINGS;
+constexpr uint32_t kCapabilities =
+    AUD_NODE_CAP_VARIABLE_BLOCK | AUD_NODE_CAP_EVENTS |
+    AUD_NODE_CAP_EVENT_OUTPUT | AUD_NODE_CAP_STRINGS |
+    AUD_NODE_CAP_PASSES_EVENTS;
 
 const AudNodeDescriptor kInputDescriptor = {
     sizeof(AudNodeDescriptor),

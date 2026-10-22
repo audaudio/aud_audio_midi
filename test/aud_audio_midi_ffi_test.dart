@@ -65,6 +65,7 @@ void main() {
         expect(descriptor.capabilities.events, isTrue);
         expect(descriptor.capabilities.eventOutput, isTrue);
         expect(descriptor.capabilities.strings, isTrue);
+        expect(descriptor.capabilities.passesEvents, isTrue);
       }
       expect(input.params, isEmpty);
       expect(output.params.single.id, AudMidiOutputNode.sysex);

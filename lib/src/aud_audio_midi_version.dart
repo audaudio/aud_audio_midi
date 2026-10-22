@@ -9,4 +9,4 @@
 // coverage:ignore-file
 
 /// The version of the `aud_audio_midi` package.
-const String audAudioMidiVersion = '0.1.4';
+const String audAudioMidiVersion = '0.1.5';

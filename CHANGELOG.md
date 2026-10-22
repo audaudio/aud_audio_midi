@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.5 - 2026-10-22
+
+### Added
+
+- Add AUD_NODE_CAP_PASSES_EVENTS to the MIDI port nodes
+- Declare the flag on aud.midi.input and aud.midi.output: after a stop or a prepare each node behind them gets one note off per note, and so does the graph's event input behind the output node
+- Let the engine refuse no note on for the nodes behind the input node, also beyond 256 notes
+- Test both nodes with recorders on a stop and a start and on a prepare while suspended, a MIDI thru out of the graph, and 280 notes through the input into a channel split
+- Document the flag in the header, README.md and README.de.md; regenerate the bindings, which catch up with the header's comment on GONE
+
 ## 0.1.4 - 2026-10-15
 
 ## 0.1.3 - 2026-10-14

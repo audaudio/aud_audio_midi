@@ -66,7 +66,9 @@ external int aud_audio_midi_register(ffi.Pointer<core.AudHostApi> host);
 /// before the cut, an end packet without data closes it at once (sysex_cut)
 /// - a type 3 end for SysEx7, a type 5 end with the stream id for SysEx8 -
 /// so no torn SysEx reaches a node unless the source refuses the end too
-/// (sysex_torn). GONE raises the source's release.
+/// (sysex_torn). GONE raises the source's release and forgets an open
+/// SysEx; one the UMP path had pushed closes with the cut end packet at
+/// the next data call.
 @ffi.Native<
   ffi.Void Function(
     ffi.Pointer<ffi.Void>,
