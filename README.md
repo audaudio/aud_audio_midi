@@ -223,6 +223,10 @@ void feed(int source, int push, int release, int size) {
   inlet `in` and the event outlet `out`. Every event of the inlet leaves
   through the outlet at its offset; a parameter event sets the parameter,
   a message event stays with the engine.
+- Both declare `AUD_NODE_CAP_PASSES_EVENTS` (ticket 37): the engine
+  refuses them no note on, and after a stop or a prepare the nodes behind
+  them close the notes they handed on, the engine those they handed out
+  of the graph, one note off per note at each receiver.
 - The output node drops SysEx (UMP types 3 and 5) unless its boolean
   parameter `sysex` is on, since the notification ring its events travel
   on is lossy.

@@ -11,9 +11,12 @@
 //
 // The nodes pass the events of their inlet through to their outlet at the
 // offset they arrive at; the output node drops SysEx (UMP types 3 and 5)
-// unless its parameter `sysex` is on. Both keep the id and the fingerprint
-// of their port as string settings on the control thread. Their process
-// calls allocate nothing and take no lock.
+// unless its parameter `sysex` is on. Both declare
+// AUD_NODE_CAP_PASSES_EVENTS (ticket 37): after a stop or a prepare of the
+// engine the nodes behind them close the notes they handed on and the
+// engine those they handed out of the graph, one note off each. Both keep
+// the id and the fingerprint of their port as string settings on the
+// control thread. Their process calls allocate nothing and take no lock.
 //
 // The adapter is the AudMidiTapFunction of a port (contract C2 of the
 // ticket): a backend of aud_midi calls it on its receive thread with UMP

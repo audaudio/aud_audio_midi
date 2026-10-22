@@ -232,6 +232,11 @@ void feed(int source, int push, int release, int size) {
   verlässt den Knoten über den Ausgang an seinem Offset; ein
   Parameter-Event setzt den Parameter, ein Message-Event bleibt bei der
   Engine.
+- Beide deklarieren `AUD_NODE_CAP_PASSES_EVENTS` (Ticket 37): Die Engine
+  verwirft ihnen kein Note-On, und nach einem Stopp oder einem Prepare
+  schließen die Knoten dahinter die Noten, die sie weitergaben, die Engine
+  die, die sie aus dem Graphen gaben, mit einem Note-Off pro Note bei
+  jedem Empfänger.
 - Der Output-Knoten verwirft SysEx (UMP-Typen 3 und 5), solange sein
   boolescher Parameter `sysex` aus ist, da der Notification-Ring, über
   den seine Events reisen, verlustbehaftet ist.

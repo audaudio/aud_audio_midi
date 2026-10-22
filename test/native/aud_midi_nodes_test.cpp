@@ -6,10 +6,12 @@
 
 // The port nodes on the graph engine of aud_audio_graph: the registration,
 // the descriptors, the pass-through at the offset, the SysEx rule of the
-// output node, the string keys, all under the engine's watchdog; the probe
-// node proves that the rtsan build catches an allocation on the audio
-// thread. The runner's main lives here.
+// output node, the string keys and the notes behind the nodes (ticket 37),
+// all under the engine's watchdog; the probe node proves that the rtsan
+// build catches an allocation on the audio thread. The runner's main lives
+// here.
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -202,6 +204,7 @@ AUD_TEST(nodes_register_once_per_graph) {
     AUD_CHECK((d->capabilities & AUD_NODE_CAP_EVENTS) != 0);
     AUD_CHECK((d->capabilities & AUD_NODE_CAP_EVENT_OUTPUT) != 0);
     AUD_CHECK((d->capabilities & AUD_NODE_CAP_STRINGS) != 0);
+    AUD_CHECK((d->capabilities & AUD_NODE_CAP_PASSES_EVENTS) != 0);
   }
   AUD_CHECK(input->num_params == 0);
   AUD_CHECK(output->num_params == 1);
@@ -415,6 +418,253 @@ AUD_TEST(rtsan_probe) {
   f.send(f.input, f.ump(midi1(0x90, 60, 100)));
   f.renderLive();
   f.renderLive();
+}
+
+// ............................................................................
+// The notes behind the nodes (ticket 37)
+
+namespace {
+
+// An event a recorder received.
+struct Received {
+  const void* recorder;
+  uint32_t offset;
+  uint32_t word0;
+  uint32_t word1;
+};
+
+// Reserved by the tests, so that the recorders allocate nothing on the
+// audio thread.
+std::vector<Received> g_received;
+// The recorders in the order they were created.
+std::vector<const void*> g_recorders;
+
+// aud.test.recorder: records the events it receives; the rest of its
+// vtable are the no-ops of the probe.
+void* recorderCreate(const AudNodeDescriptor*, const AudHostApi*) {
+  void* recorder = new int(0);
+  g_recorders.push_back(recorder);
+  return recorder;
+}
+void recorderProcess(void* instance, const AudProcessContext* context) {
+  for (uint32_t i = 0; i < context->num_events; ++i) {
+    const AudEvent& e = context->events[i];
+    g_received.push_back({instance, e.sample_offset, e.words[0], e.words[1]});
+  }
+}
+
+const AudNodeVTable kRecorderVTable = {
+    sizeof(AudNodeVTable), recorderCreate, probeDestroy,    probePrepare,
+    probeReset,            probeSetParam,  recorderProcess, nullptr,
+    nullptr,               nullptr,        nullptr,         nullptr,
+};
+
+AudNodeDescriptor recorderDescriptor() {
+  AudNodeDescriptor d = kProbeDescriptor;
+  d.type_id = "aud.test.recorder";
+  d.name = "Recorder";
+  d.vtable = &kRecorderVTable;
+  return d;
+}
+const AudNodeDescriptor kRecorderDescriptor = recorderDescriptor();
+
+// A fixture whose graph knows the recorder; the records start empty.
+struct NotesFixture : Fixture {
+  NotesFixture() {
+    AUD_CHECK(host()->register_node_type(host()->host, &kRecorderDescriptor) ==
+              AUD_OK);
+    g_received.clear();
+    g_received.reserve(4096);
+    g_recorders.clear();
+  }
+
+  // Creates a recorder; returns its handle.
+  int32_t recorder() {
+    const int32_t handle =
+        aud_graph_create_node(graph, "aud.test.recorder", nullptr);
+    AUD_CHECK(handle > 0);
+    return handle;
+  }
+
+  // Connects the event outlet `fromPort` of `from` to the inlet 0 of `to`.
+  void connect(int32_t from, int32_t to, uint32_t fromPort = 0) {
+    aud_graph_begin(graph);
+    AUD_CHECK(aud_graph_connect_events(graph, from, fromPort, to, 0) ==
+              AUD_OK);
+    AUD_CHECK(aud_graph_commit(graph) > 0);
+  }
+
+  // Holds the notes `first` to `first + count - 1` on `channel`: note ons
+  // to `node` in one block; the records and notifications start empty.
+  void hold(int32_t node, uint32_t first, uint32_t count,
+            uint32_t channel = 0) {
+    for (uint32_t note = first; note < first + count; ++note) {
+      send(node, ump(midi1(0x90 | channel, note, 100)));
+    }
+    renderLive();
+    g_received.clear();
+    notifications.clear();
+  }
+
+  // A stop and a start, then the first block after the restart.
+  void stopAndStart() {
+    AUD_CHECK(aud_graph_stop(graph) == AUD_OK);
+    AUD_CHECK(aud_graph_start(graph) == AUD_OK);
+    renderLive();
+  }
+
+  // A prepare while suspended, then the first block after the resume.
+  void prepareWhileSuspended() {
+    AUD_CHECK(aud_graph_suspend(graph) == AUD_OK);
+    AUD_CHECK(aud_graph_prepare(graph, kRate, kFrames) == AUD_OK);
+    AUD_CHECK(aud_graph_resume(graph) == AUD_OK);
+    renderLive();
+  }
+};
+
+// The channel << 8 | note of each note off at offset 0 among `events`,
+// sorted; `others` counts the rest.
+std::vector<uint32_t> closedNotes(const std::vector<Received>& events,
+                                  uint32_t* others) {
+  std::vector<uint32_t> notes;
+  for (const Received& r : events) {
+    if (r.offset == 0 && aud_ump_is_note_off(r.word0, r.word1)) {
+      notes.push_back(aud_ump_channel(r.word0) << 8 | aud_ump_note(r.word0));
+    } else {
+      *others += 1;
+    }
+  }
+  std::sort(notes.begin(), notes.end());
+  return notes;
+}
+
+// Whether `recorder` received one note off at the block start for each
+// of the notes `first` to `first + count - 1` on `channel`, and nothing
+// else.
+bool closedOnce(const void* recorder, uint32_t first, uint32_t count,
+                uint32_t channel = 0) {
+  std::vector<Received> events;
+  for (const Received& r : g_received) {
+    if (r.recorder == recorder) events.push_back(r);
+  }
+  std::vector<uint32_t> expected;
+  for (uint32_t note = first; note < first + count; ++note) {
+    expected.push_back(channel << 8 | note);
+  }
+  uint32_t others = 0;
+  return closedNotes(events, &others) == expected && others == 0;
+}
+
+// Whether the events `node` handed out of the graph are one note off at
+// the block start for each of the notes `first` to `first + count - 1`.
+bool sentOutOnce(const NotesFixture& f, int32_t node, uint32_t first,
+                 uint32_t count) {
+  std::vector<Received> events;
+  for (const AudEvent& e : f.arrived(node)) {
+    events.push_back({nullptr, e.sample_offset, e.words[0], e.words[1]});
+  }
+  std::vector<uint32_t> expected;
+  for (uint32_t note = first; note < first + count; ++note) {
+    expected.push_back(note);
+  }
+  uint32_t others = 0;
+  return closedNotes(events, &others) == expected && others == 0;
+}
+
+}  // namespace
+
+AUD_TEST(nodes_leave_the_closing_of_notes_to_the_nodes_behind_them) {
+  for (const char* type : {AUD_MIDI_INPUT_TYPE_ID, AUD_MIDI_OUTPUT_TYPE_ID}) {
+    NotesFixture f;
+    const int32_t node = aud_graph_create_node(f.graph, type, nullptr);
+    const int32_t recorder = f.recorder();
+    f.connect(node, recorder);
+    AUD_CHECK(aud_graph_start(f.graph) == AUD_OK);
+    f.renderLive();
+    // A stop and a start: the recorder closes the notes the node handed
+    // it, one note off each; the node hands on none of its own.
+    f.hold(node, 60, 3);
+    f.stopAndStart();
+    AUD_CHECK(closedOnce(g_recorders[0], 60, 3));
+    // A prepare while suspended closes them the same way.
+    f.hold(node, 70, 2);
+    f.prepareWhileSuspended();
+    AUD_CHECK(closedOnce(g_recorders[0], 70, 2));
+    // Nothing more follows.
+    g_received.clear();
+    f.renderLive();
+    AUD_CHECK(g_received.empty());
+  }
+}
+
+AUD_TEST(nodes_close_the_notes_they_sent_out_of_the_graph_once) {
+  NotesFixture f;
+  // The input plays through the output - a MIDI thru - and a recorder
+  // listens to the output too.
+  f.wire();
+  const int32_t recorder = f.recorder();
+  f.connect(f.output, recorder);
+  f.renderLive();
+  // The notes reach the graph's event input from the output node; a stop
+  // and a start send one note off each there, and the recorder closes its
+  // own.
+  f.hold(f.input, 60, 3);
+  f.stopAndStart();
+  AUD_CHECK(sentOutOnce(f, f.output, 60, 3));
+  AUD_CHECK(f.arrived(f.input).empty());
+  AUD_CHECK(closedOnce(g_recorders[0], 60, 3));
+  // A prepare while suspended does the same.
+  f.hold(f.input, 70, 2);
+  f.prepareWhileSuspended();
+  AUD_CHECK(sentOutOnce(f, f.output, 70, 2));
+  AUD_CHECK(closedOnce(g_recorders[0], 70, 2));
+  // Nothing more follows.
+  g_received.clear();
+  f.notifications.clear();
+  f.renderLive();
+  AUD_CHECK(g_received.empty() && f.arrived(f.output).empty());
+}
+
+AUD_TEST(nodes_refuse_no_note_on_for_the_nodes_behind_them) {
+  NotesFixture f;
+  // The input feeds a channel split with a recorder on MIDI channels 1 to
+  // 4: 70 notes on each, 280 through the input - more than one tracker of
+  // the engine holds, fewer than each recorder does.
+  const int32_t input =
+      aud_graph_create_node(f.graph, AUD_MIDI_INPUT_TYPE_ID, nullptr);
+  const int32_t split =
+      aud_graph_create_node(f.graph, AUD_GRAPH_CHANNEL_SPLIT_TYPE_ID, nullptr);
+  int32_t recorders[4];
+  for (int32_t& recorder : recorders) recorder = f.recorder();
+  f.connect(input, split);
+  for (uint32_t channel = 0; channel < 4; ++channel) {
+    f.connect(split, recorders[channel], channel);
+  }
+  AUD_CHECK(aud_graph_start(f.graph) == AUD_OK);
+  f.renderLive();
+  for (uint32_t channel = 0; channel < 4; ++channel) {
+    for (uint32_t note = 30; note < 100; ++note) {
+      f.send(input, f.ump(midi1(0x90 | channel, note, 100)));
+    }
+  }
+  f.renderLive();
+  for (uint32_t channel = 0; channel < 4; ++channel) {
+    uint32_t count = 0;
+    for (const Received& r : g_received) {
+      if (r.recorder == g_recorders[channel]) count += 1;
+    }
+    AUD_CHECK(count == 70);
+  }
+  AudGraphStats stats{};
+  stats.struct_size = sizeof(AudGraphStats);
+  aud_graph_get_stats(f.graph, &stats);
+  AUD_CHECK(stats.events_dropped == 0);
+  // Each recorder closes its 70 notes, once.
+  g_received.clear();
+  f.stopAndStart();
+  for (uint32_t channel = 0; channel < 4; ++channel) {
+    AUD_CHECK(closedOnce(g_recorders[channel], 30, 70, channel));
+  }
 }
 
 int main() { return aud_test::run(); }
