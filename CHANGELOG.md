@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.6 - 2026-10-24
 
 ### Changed
 
@@ -95,7 +95,6 @@
 - Let the detach of the disposal test fail with a MidiPortGone, which the MIDI host swallows
 
 - Add review fixes of ticket 26
-
 
 ## 0.0.2 - 2026-10-08
 
