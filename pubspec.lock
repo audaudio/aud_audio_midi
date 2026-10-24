@@ -36,108 +36,128 @@ packages:
   aud_audio:
     dependency: "direct main"
     description:
-      path: "../aud_audio"
-      relative: true
-    source: path
-    version: "0.4.4"
+      path: "."
+      resolved-ref: "118f2204cff5c85e7d71a4889e403f1a87283f64"
+      tag-pattern: "{{version}}"
+      url: "git@github.com:audaudio/aud_audio.git"
+    source: git
+    version: "0.4.5"
   aud_audio_core:
     dependency: "direct main"
     description:
-      path: "../aud_audio_core"
-      relative: true
-    source: path
-    version: "0.5.3"
+      path: "."
+      resolved-ref: "9f07300117bb29b5dfd0847148362270004e334c"
+      tag-pattern: "{{version}}"
+      url: "git@github.com:audaudio/aud_audio_core.git"
+    source: git
+    version: "0.5.4"
   aud_audio_graph:
     dependency: "direct main"
     description:
-      path: "../aud_audio_graph"
-      relative: true
-    source: path
-    version: "0.5.4"
+      path: "."
+      resolved-ref: "7dc97f1a28a396b53c078efbfd92d1776de33c82"
+      tag-pattern: "{{version}}"
+      url: "git@github.com:audaudio/aud_audio_graph.git"
+    source: git
+    version: "0.5.5"
   aud_audio_io:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_audio_io"
-      relative: true
-    source: path
-    version: "0.3.5"
+      path: "."
+      resolved-ref: b76f7fabcdb84d8c6ed98d68174734c715866d3d
+      tag-pattern: "{{version}}"
+      url: "git@github.com:audaudio/aud_audio_io.git"
+    source: git
+    version: "0.4.0"
   aud_audio_web:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_audio_web"
-      relative: true
-    source: path
-    version: "0.0.9"
+      path: "."
+      resolved-ref: "3cef6c5e7077dced84fd12afb4baa08bb73736ea"
+      tag-pattern: "{{version}}"
+      url: "git@github.com:audaudio/aud_audio_web.git"
+    source: git
+    version: "0.0.10"
   aud_midi:
     dependency: "direct main"
     description:
-      path: "../aud_midi"
-      relative: true
-    source: path
-    version: "0.1.3"
+      name: aud_midi
+      sha256: "6ebbd90420e4e2f81a687b1b76c06ce7439032673f3246c3c2212a5b6b6aa9cd"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.4"
   aud_midi_android:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_midi_android"
-      relative: true
-    source: path
-    version: "0.2.0"
+      name: aud_midi_android
+      sha256: "32b12759dd5d4f0873f90d1927c98faed3dcd61c4af30afbc8e0d0d7269a0ea8"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.2.1"
   aud_midi_apple:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_midi_apple"
-      relative: true
-    source: path
-    version: "0.1.1"
+      name: aud_midi_apple
+      sha256: "814df24f7eeeecaba85d9a0c3e7b6539d80cc49d315da0d469b44dd2a783437f"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
   aud_midi_core:
     dependency: "direct main"
     description:
-      path: "../aud_midi_core"
-      relative: true
-    source: path
-    version: "0.1.1"
+      name: aud_midi_core
+      sha256: f48ab2ff29ac755dd670f46a37f794fdd918e46614448ca6506b369f5e2d2db8
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.3"
   aud_midi_linux:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_midi_linux"
-      relative: true
-    source: path
-    version: "0.1.1"
+      name: aud_midi_linux
+      sha256: "523c0cd27e35a60a6174581174422295214fb6db577825c4812cc92add40f9b3"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
   aud_midi_network:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_midi_network"
-      relative: true
-    source: path
-    version: "0.1.1"
+      name: aud_midi_network
+      sha256: "2c1b7791b73470ea5c286ad652ad4afba553396dc898607762c523c9832dca34"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.2"
   aud_midi_rtp:
-    dependency: "direct overridden"
+    dependency: transitive
     description:
-      path: "../aud_midi_rtp"
-      relative: true
-    source: path
-    version: "0.1.0"
+      name: aud_midi_rtp
+      sha256: "97c583b61e6aa16de51a51a7e76bdd77e56b5058b7d8f9c3aecc444b3bccdae9"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.1"
   aud_midi_standard:
     dependency: "direct main"
     description:
-      path: "../aud_midi_standard"
-      relative: true
-    source: path
-    version: "0.1.0"
-  aud_midi_web:
-    dependency: "direct overridden"
-    description:
-      path: "../aud_midi_web"
-      relative: true
-    source: path
+      name: aud_midi_standard
+      sha256: c97a486531d36b9fa9765be8145d4367d7d501af113af8faf10b9154e6af09b9
+      url: "https://pub.dev"
+    source: hosted
     version: "0.1.1"
-  aud_midi_windows:
-    dependency: "direct overridden"
+  aud_midi_web:
+    dependency: transitive
     description:
-      path: "../aud_midi_windows"
-      relative: true
-    source: path
+      name: aud_midi_web
+      sha256: ca3aa41cbfcce183e5a9b2e0a25815535135ee909b236a095bddeda8743b80f6
+      url: "https://pub.dev"
+    source: hosted
     version: "0.1.2"
+  aud_midi_windows:
+    dependency: transitive
+    description:
+      name: aud_midi_windows
+      sha256: "50f34aaad760ed7df467c6f2e4aef1a1036f39d519af02cc2457d74236a961f7"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.1.3"
   bluez:
     dependency: transitive
     description:
