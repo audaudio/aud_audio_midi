@@ -19,8 +19,13 @@ late FakeMidiBackend _fake;
 
 MidiBackend _backend() => _fake;
 
-typedef _TapC =
-    Void Function(Pointer<Void>, Uint32, Pointer<Void>, Uint32, Int64);
+typedef _TapC = Void Function(
+  Pointer<Void>,
+  Uint32,
+  Pointer<Void>,
+  Uint32,
+  Int64,
+);
 typedef _TapDart = void Function(Pointer<Void>, int, Pointer<Void>, int, int);
 
 const _noteOn = 0x20903C64; // group 0, channel 0, note 60, velocity 100
@@ -128,9 +133,8 @@ void main() {
   ];
 
   void callTap(MidiNativeTap tap, int kind, List<int> data, int hostNs) {
-    final function = Pointer<NativeFunction<_TapC>>.fromAddress(
-      tap.function,
-    ).asFunction<_TapDart>();
+    final function = Pointer<NativeFunction<_TapC>>.fromAddress(tap.function)
+        .asFunction<_TapDart>();
     final words = calloc<Uint32>(data.isEmpty ? 1 : data.length);
     for (var i = 0; i < data.length; i++) {
       words[i] = data[i];

@@ -1,17 +1,22 @@
 # aud_audio_midi
 
-The MIDI bridge of the Audanika Audio Engine: the ports of the `aud_midi`
-family become event inlets and outlets of the graph of `aud_audio`.
+English | [Deutsch](README.de.md)
+
+[![CI](https://github.com/audaudio/aud_audio_midi/actions/workflows/quick_check.yaml/badge.svg)](https://github.com/audaudio/aud_audio_midi/actions/workflows/quick_check.yaml)
+
+MIDI bridge of the Audanika Audio Engine: aud_midi ports as event inlets
+and outlets of the graph.
+
 `AudMidiBridge` binds the ports of a `Midi` to an engine by port id, with
 hot-plug; the package holds the port nodes `aud.midi.input` and
 `aud.midi.output`, the parser of MIDI 1.0 byte streams into Universal MIDI
 Packets and the tap adapter that pushes the MIDI of a port into an event
 source of the graph - on the receive thread of the backend or from a Dart
-isolate, through one native function.
+isolate, through one native function. It needs Flutter and runs on the
+native platforms. Part of the Audanika Audio Engine; planned in
+[aud_audio_pm](https://github.com/audaudio/aud_audio_pm).
 
-Part of the Audanika Audio Engine; planned in [aud_audio_pm](https://github.com/audaudio/aud_audio_pm).
-
-## Goals
+## Motivation
 
 - A MIDI keyboard plays the SFZ sampler on iOS and Android at a constant
   latency of one block plus the output latency (ticket 26, step S8)
@@ -28,13 +33,16 @@ Part of the Audanika Audio Engine; planned in [aud_audio_pm](https://github.com/
 
 ## Installation
 
+The package is not published to pub.dev. Add it as a git dependency to
+`pubspec.yaml` and run `flutter pub get`:
+
 ```yaml
 dependencies:
   aud_audio_midi:
     git:
       url: git@github.com:audaudio/aud_audio_midi.git
-      tag_pattern: '{{version}}'
-    version: ^0.1.0
+      tag_pattern: "{{version}}"
+    version: ^0.1.6
 ```
 
 An app depends on `aud_audio` and registers the package with its engine
@@ -42,38 +50,9 @@ An app depends on `aud_audio` and registers the package with its engine
 and on `aud_midi`, `aud_midi_core` and `aud_midi_standard` from pub.dev,
 so it needs Flutter. The build hook compiles the nodes, the parser and the
 adapter with the C++ toolchain of the target against the headers of
-`aud_audio_core`. The native tests
-need Node.js and `clang++`; their RealtimeSanitizer build needs a clang
-that has it, e.g. LLVM from Homebrew on macOS (`brew install llvm`), and
-is skipped without one.
+`aud_audio_core`.
 
-## Documentation
-
-- [The plan of ticket 26](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/tickets/2026-10-12-26-bridge-aud-midi-ports-into-the-engine-on-ios-and-android.md)
-  with the scope, the budgets and the decisions of the plan review
-- The decisions behind the package:
-  [midi-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-001.md)
-  (UMP as the event format),
-  [interop-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/interop-001.md)
-  (Dart never runs on the audio thread),
-  [abi-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/abi-001.md)
-  (the C ABI of the engine),
-  [interop-003](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/interop-003.md)
-  (event sources for native producers),
-  [midi-002](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-002.md)
-  (the native tap as the path),
-  [midi-003](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-003.md)
-  (the fixed latency), and in aud_midi_pm
-  [native-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/native-001.md)
-  and
-  [ports-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/ports-001.md)
-- The C API: [`src/aud_audio_midi.h`](src/aud_audio_midi.h); the parser:
-  [`src/aud_midi_parser.h`](src/aud_midi_parser.h)
-- The notices: [`NOTICES.md`](NOTICES.md) - the package holds no
-  third-party code
-- The guides in [`doc/guides`](doc/guides)
-
-## Code Examples
+## Usage
 
 A MIDI keyboard plays an instrument of an engine:
 
@@ -98,54 +77,51 @@ Future<void> play(AudNode instrument, AudEngine engine) async {
 }
 ```
 
-The port nodes on a graph of `aud_audio_graph` (`aud_audio_midi_ffi.dart`
-on native platforms):
+## Limitations
 
-```dart
-import 'package:aud_audio_graph/aud_audio_graph_ffi.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+- The bridge, the nodes and the adapter are native: `aud_audio_midi_ffi.dart`
+  works on the native platforms only; the neutral library
+  `aud_audio_midi.dart` compiles for the web but drives no port there
+- A SysEx over 64 KiB (`maxSysexBytes`) is dropped through its end; SysEx
+  and clock are dropped while a source holds more than half its capacity
+- The output node drops SysEx unless its parameter `sysex` is on, since
+  the notification ring its events travel on is lossy
+- The C ABI reads no strings back: the port id and fingerprint live on
+  the control thread and in the graph document only
+- A Bluetooth LE port calibrates its margin up to 30 ms; rarer, longer
+  delays play late
+- The native tests need Node.js and `clang++`; their RealtimeSanitizer
+  build needs a clang that has it, e.g. LLVM from Homebrew on macOS
+  (`brew install llvm`), and is skipped without one
 
-void main() {
-  final graph = AudGraphFfi(maxFrames: 256);
-  AudAudioMidi.registerWith(graph.hostApi); // throws AudAudioMidiException
-  final keys = graph.createNode(AudMidiInputNode.typeId, name: 'keys');
-  final thru = graph.createNode(AudMidiOutputNode.typeId, name: 'thru');
-  graph.setString(keys, AudMidiPortNode.portId, 'coremidi:12345');
-  graph.setString(keys, AudMidiPortNode.portFingerprint, 'Acme|Keys|SN1|input|0');
-  graph.transaction((tx) {
-    tx.connectEvents(keys, thru);
-    tx.connectEvents(thru, graph.io); // the events reach Dart as notifications
-  });
-  graph.setParam(thru, AudMidiOutputNode.sysex, 1); // let SysEx through
-  graph.start();
-}
-```
+## Documentation
 
-The adapter on an event source, fed from Dart - the native tap of a
-backend calls the same function with `AudMidiAdapter.tapFunction` and
-`adapter.address`:
+- [The plan of ticket 26](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/tickets/2026-10-12-26-bridge-aud-midi-ports-into-the-engine-on-ios-and-android.md)
+  with the scope, the budgets and the decisions of the plan review
+- The decisions behind the package:
+  [midi-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-001.md)
+  (UMP as the event format),
+  [interop-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/interop-001.md)
+  (Dart never runs on the audio thread),
+  [abi-001](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/abi-001.md)
+  (the C ABI of the engine),
+  [interop-003](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/interop-003.md)
+  (event sources for native producers),
+  [midi-002](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-002.md)
+  (the native tap as the path),
+  [midi-003](https://github.com/audaudio/aud_audio_pm/blob/main/doc/2026-Q4/concepts/decisions/midi-003.md)
+  (the fixed latency), and in aud_midi_pm
+  [native-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/native-001.md)
+  and
+  [ports-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/ports-001.md)
+- The C API: [src/aud_audio_midi.h](src/aud_audio_midi.h); the parser:
+  [src/aud_midi_parser.h](src/aud_midi_parser.h)
+- The notices: [NOTICES.md](NOTICES.md) - the package holds no
+  third-party code
+- The blog posts of the changes in [doc/blog](doc/blog)
+- The guides in [doc/guides](doc/guides)
 
-```dart
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
-
-void feed(int source, int push, int release, int size) {
-  final adapter = AudMidiAdapter(
-    source: source, // the addresses an AudEventSource of the graph offers
-    push: push,
-    release: release,
-    size: size,
-    capacity: 4096,
-  );
-  adapter.pushBytes([0x90, 60, 100], hostTimeNs: 123456789);
-  adapter.pushUmp([0x20803C00], hostTimeNs: 123556789);
-  adapter.gone(hostTimeNs: 123656789); // the port went: release is raised
-  print(adapter.stats); // pushed, rejected, dropped, gone, malformed
-  adapter.close(); // synchronous: the tap never touches the source again
-  adapter.dispose(); // after the tap detached
-}
-```
-
-## How It Works
+## How it works
 
 ### The bridge
 
@@ -219,6 +195,29 @@ void feed(int source, int push, int release, int size) {
 
 ### The nodes
 
+The port nodes on a graph of `aud_audio_graph` (`aud_audio_midi_ffi.dart`
+on native platforms):
+
+```dart
+import 'package:aud_audio_graph/aud_audio_graph_ffi.dart';
+import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+
+void main() {
+  final graph = AudGraphFfi(maxFrames: 256);
+  AudAudioMidi.registerWith(graph.hostApi); // throws AudAudioMidiException
+  final keys = graph.createNode(AudMidiInputNode.typeId, name: 'keys');
+  final thru = graph.createNode(AudMidiOutputNode.typeId, name: 'thru');
+  graph.setString(keys, AudMidiPortNode.portId, 'coremidi:12345');
+  graph.setString(keys, AudMidiPortNode.portFingerprint, 'Acme|Keys|SN1|input|0');
+  graph.transaction((tx) {
+    tx.connectEvents(keys, thru);
+    tx.connectEvents(thru, graph.io); // the events reach Dart as notifications
+  });
+  graph.setParam(thru, AudMidiOutputNode.sysex, 1); // let SysEx through
+  graph.start();
+}
+```
+
 - `aud.midi.input` and `aud.midi.output` have no audio buses, the event
   inlet `in` and the event outlet `out`. Every event of the inlet leaves
   through the outlet at its offset; a parameter event sets the parameter,
@@ -255,6 +254,30 @@ void feed(int source, int push, int release, int size) {
 
 ### The adapter
 
+The adapter on an event source, fed from Dart - the native tap of a
+backend calls the same function with `AudMidiAdapter.tapFunction` and
+`adapter.address`:
+
+```dart
+import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+
+void feed(int source, int push, int release, int size) {
+  final adapter = AudMidiAdapter(
+    source: source, // the addresses an AudEventSource of the graph offers
+    push: push,
+    release: release,
+    size: size,
+    capacity: 4096,
+  );
+  adapter.pushBytes([0x90, 60, 100], hostTimeNs: 123456789);
+  adapter.pushUmp([0x20803C00], hostTimeNs: 123556789);
+  adapter.gone(hostTimeNs: 123656789); // the port went: release is raised
+  print(adapter.stats); // pushed, rejected, dropped, gone, malformed
+  adapter.close(); // synchronous: the tap never touches the source again
+  adapter.dispose(); // after the tap detached
+}
+```
+
 - `aud_audio_midi_tap` is the `AudMidiTapFunction` of contract C2: UMP
   words pass through packet by packet, bytes go through the parser, GONE
   raises the source's release and forgets the running status and an open
@@ -276,7 +299,20 @@ void feed(int source, int push, int release, int size) {
   from one thread at a time; GONE, close and the stats may come from
   others and touch atomics only.
 
-### Tests
+## Status
+
+Version 0.1.6, before 1.0 - the API may change between minor versions.
+The nodes register against ABI 0.4 of `aud_audio_core`.
+
+## Contributing
+
+Tickets run through the `gg` workflow: see the
+[develop guide](doc/guides/develop-guide.md), the
+[code guide](doc/guides/code-guide.md), the
+[test guide](doc/guides/test-guide.md) and the
+[review guide](doc/guides/for-ai/ai-review-guide.md).
+
+Run the tests:
 
 ```bash
 flutter test
@@ -297,8 +333,6 @@ node scripts/test-native.js
   `AUD_TEST_FILTER` runs the tests whose name contains it, `AUD_GRAPH_SRC`
   builds against another `src` of the graph.
 
-## Contributing
+## License
 
-Tickets run through the `gg` workflow: see the
-[Develop Guide](doc/guides/develop-guide.md) and the
-[Review Guide](doc/guides/for-ai/ai-review-guide.md).
+MIT - see [LICENSE](LICENSE).

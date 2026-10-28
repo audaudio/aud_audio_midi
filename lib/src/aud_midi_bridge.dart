@@ -606,16 +606,14 @@ class AudMidiInput {
     await _attachProducer();
   });
 
-  AudEventSourceFfi _createSource() =>
-      bridge.engine.graph.createEventSource(
-            node,
-            timing: _timing,
-            latencyNs: _timing == AudSourceTiming.fixed
-                ? bridge.baseLatencyNs + _floorNs()
-                : 0,
-            capacity: bridge.options.capacity,
-          )
-          as AudEventSourceFfi;
+  AudEventSourceFfi _createSource() => bridge.engine.graph.createEventSource(
+    node,
+    timing: _timing,
+    latencyNs: _timing == AudSourceTiming.fixed
+        ? bridge.baseLatencyNs + _floorNs()
+        : 0,
+    capacity: bridge.options.capacity,
+  ) as AudEventSourceFfi;
 
   /// Attaches a producer when the port is there: the native tap where the
   /// backend offers it, else the Dart path.
