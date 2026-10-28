@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- Require Dart 3.13 and Flutter 3.47, upgrade deps
+
+- Require Dart 3.13 and Flutter 3.47
+- Upgrade dna_audanika to ^0.1.0
+- Upgrade helix to ^1.14.0
+- Set the identity the DNA layers ask for in dna/_vars.json
+- Reformat 3 files with the Dart 3.13 formatter
+- Add the blog post of this change, in English and German
+- Bring the README to the README template, in English and German
+
 ## 0.1.6 - 2026-10-24
 
 ### Changed
@@ -95,6 +109,7 @@
 - Let the detach of the disposal test fail with a MidiPortGone, which the MIDI host swallows
 
 - Add review fixes of ticket 26
+
 
 ## 0.0.2 - 2026-10-08
 
