@@ -26,7 +26,10 @@
 
 - Upgrade aud_midi_standard to 0.2.0
 
-Lift the lock file to the newest resolvable versions
+- Upgrade aud_midi_standard to 0.2.0
+
+- Lift the lock file to the newest resolvable versions
+- Upgrade the git dependencies to their published versions
 
 ## 0.1.6 - 2026-10-24
 
