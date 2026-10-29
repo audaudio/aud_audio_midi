@@ -4,7 +4,7 @@
 // Use of this source code is governed by terms that can be
 // found in the LICENSE file in the root of this package.
 
-// The entry point of aud_audio_midi (step S8, ticket 26): the port nodes
+// The entry point of aud_audio_with_midi (step S8, ticket 26): the port nodes
 // `aud.midi.input` and `aud.midi.output`, registered with an engine through
 // the C ABI of aud_audio_core (ABI 0.4), and the tap adapter that carries
 // the MIDI of an aud_midi port into an event source of aud_audio_graph.
@@ -27,8 +27,8 @@
 // both paths share the parser. The adapter is nonblocking: no allocation,
 // no lock, no I/O on the data path.
 
-#ifndef AUD_AUDIO_MIDI_H
-#define AUD_AUDIO_MIDI_H
+#ifndef AUD_AUDIO_WITH_MIDI_H
+#define AUD_AUDIO_WITH_MIDI_H
 
 #include <stdint.h>
 
@@ -74,7 +74,7 @@ enum {
 
 // [control] Registers the node types with the host api of an engine; AUD_OK
 // or the first error code. An AudRegisterFunction.
-AUD_EXPORT int32_t aud_audio_midi_register(const AudHostApi* host);
+AUD_EXPORT int32_t aud_audio_with_midi_register(const AudHostApi* host);
 
 // ............................................................................
 // The event source of aud_audio_graph (contract C1)
@@ -155,7 +155,7 @@ typedef struct AudMidiAdapterStats {
 
 // [control] Creates an adapter for a source; NULL for a NULL config, a
 // short struct, a NULL source, push or release, or a group above 15.
-AUD_EXPORT AudMidiAdapter* aud_audio_midi_adapter_create(
+AUD_EXPORT AudMidiAdapter* aud_audio_with_midi_adapter_create(
     const AudMidiAdapterConfig* config);
 
 // [control] Closes the adapter: after it returns, the tap never touches
@@ -163,10 +163,10 @@ AUD_EXPORT AudMidiAdapter* aud_audio_midi_adapter_create(
 // yield, bounded; a wait that runs out logs and returns), later calls
 // return at once and count as dropped_closed. The engine may then dispose
 // the graph before the tap is detached. Calling it again changes nothing.
-AUD_EXPORT void aud_audio_midi_adapter_close(AudMidiAdapter* adapter);
+AUD_EXPORT void aud_audio_with_midi_adapter_close(AudMidiAdapter* adapter);
 
 // [control] Destroys the adapter, after the tap detached; closes it first.
-AUD_EXPORT void aud_audio_midi_adapter_destroy(AudMidiAdapter* adapter);
+AUD_EXPORT void aud_audio_with_midi_adapter_destroy(AudMidiAdapter* adapter);
 
 // The AudMidiTapFunction of an adapter; `user` is the adapter. Nonblocking.
 // UMP passes through packet by packet, MIDI 1.0 bytes become UMP: running
@@ -182,17 +182,17 @@ AUD_EXPORT void aud_audio_midi_adapter_destroy(AudMidiAdapter* adapter);
 // (sysex_torn). GONE raises the source's release and forgets an open
 // SysEx; one the UMP path had pushed closes with the cut end packet at
 // the next data call.
-AUD_EXPORT void aud_audio_midi_tap(void* user, uint32_t kind,
+AUD_EXPORT void aud_audio_with_midi_tap(void* user, uint32_t kind,
                                    const void* data, uint32_t count,
                                    int64_t host_time_ns);
 
 // [any thread] The counters of the adapter; AUD_ERROR_INVALID_ARGUMENT for
 // a NULL adapter or stats, or a short struct.
-AUD_EXPORT int32_t aud_audio_midi_adapter_stats(const AudMidiAdapter* adapter,
+AUD_EXPORT int32_t aud_audio_with_midi_adapter_stats(const AudMidiAdapter* adapter,
                                                 AudMidiAdapterStats* stats);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif  // AUD_AUDIO_MIDI_H
+#endif  // AUD_AUDIO_WITH_MIDI_H

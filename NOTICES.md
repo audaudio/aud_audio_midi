@@ -1,4 +1,4 @@
-# Notices of aud_audio_midi
+# Notices of aud_audio_with_midi
 
 The package holds no third-party code: the port nodes, the MIDI 1.0 byte
 parser and the tap adapter in `src/` are Audanika's own, under the license

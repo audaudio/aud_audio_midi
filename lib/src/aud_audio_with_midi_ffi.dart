@@ -9,7 +9,7 @@ import 'dart:ffi';
 import 'package:aud_audio_core/aud_audio_core.dart';
 import 'package:aud_audio_core/aud_audio_core_bindings.dart' as core;
 
-import 'aud_audio_midi_bindings_generated.dart' as bindings;
+import 'aud_audio_with_midi_bindings_generated.dart' as bindings;
 
 // #############################################################################
 /// The native side of the package: the registration of the port nodes
@@ -24,21 +24,21 @@ import 'aud_audio_midi_bindings_generated.dart' as bindings;
 /// ```
 abstract final class AudAudioMidi {
   /// The name of the package, e.g. for an engine's package list.
-  static const String name = 'aud_audio_midi';
+  static const String name = 'aud_audio_with_midi';
 
   /// The register function of the package,
-  /// `aud_audio_midi_register(const AudHostApi*)`, which an engine calls
+  /// `aud_audio_with_midi_register(const AudHostApi*)`, which an engine calls
   /// with its host api.
   static core.AudRegisterFunction get register =>
       Native.addressOf<NativeFunction<core.AudRegisterFunctionFunction>>(
-        bindings.aud_audio_midi_register,
+        bindings.aud_audio_with_midi_register,
       );
 
   /// Registers the node types with the engine behind [host], e.g.
   /// `AudGraphFfi.hostApi`; throws an [AudAudioMidiException] when the
   /// engine refuses them.
   static void registerWith(Pointer<core.AudHostApi> host) {
-    final result = bindings.aud_audio_midi_register(host);
+    final result = bindings.aud_audio_with_midi_register(host);
     if (result != AUD_OK) throw AudAudioMidiException(code: result);
   }
 }

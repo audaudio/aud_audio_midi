@@ -5,7 +5,7 @@
 // found in the LICENSE file in the root of this package.
 
 import 'package:aud_audio/aud_audio_ffi.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 import 'package:aud_midi_core/aud_midi_core.dart';
 import 'package:aud_midi_standard/aud_midi_standard.dart';
 import 'package:test/test.dart';

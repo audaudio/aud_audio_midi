@@ -9,7 +9,7 @@ import 'dart:ffi';
 import 'package:aud_audio_core/aud_audio_core.dart';
 import 'package:aud_audio_core/aud_audio_core_bindings.dart' as core;
 import 'package:aud_audio_graph/aud_audio_graph_ffi.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 import 'package:aud_midi_standard/aud_midi_standard.dart';
 import 'package:test/test.dart';
 
@@ -88,7 +88,7 @@ void main() {
     test('hands its register function to an engine', () {
       final graph = AudGraphFfi(listen: false, maxFrames: 256);
       addTearDown(graph.dispose);
-      expect(AudAudioMidi.name, 'aud_audio_midi');
+      expect(AudAudioMidi.name, 'aud_audio_with_midi');
       final register = AudAudioMidi.register
           .asFunction<int Function(Pointer<core.AudHostApi>)>();
       expect(register(graph.hostApi), AUD_OK);

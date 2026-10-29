@@ -18,7 +18,7 @@
 #include <vector>
 
 #include "aud_audio_graph.h"
-#include "aud_audio_midi.h"
+#include "aud_audio_with_midi.h"
 #include "aud_test.hpp"
 #include "aud_ump.h"
 
@@ -51,7 +51,7 @@ struct Fixture {
     config.output_channels = &outChannels;
     graph = aud_graph_create(&config);
     AUD_CHECK(graph != nullptr);
-    AUD_CHECK(aud_audio_midi_register(aud_graph_host_api(graph)) == AUD_OK);
+    AUD_CHECK(aud_audio_with_midi_register(aud_graph_host_api(graph)) == AUD_OK);
     out.assign(outChannels, std::vector<float>(kFrames, 0.0f));
     for (auto& channel : out) outPointers.push_back(channel.data());
     outBus = {sizeof(AudAudioBus), outChannels, outPointers.data()};
@@ -162,9 +162,9 @@ uint32_t sysex8(uint32_t status, uint32_t bytes) {
 // Registration and descriptors
 
 AUD_TEST(nodes_register_refuses_a_bad_host) {
-  AUD_CHECK(aud_audio_midi_register(nullptr) == AUD_ERROR_INVALID_ARGUMENT);
+  AUD_CHECK(aud_audio_with_midi_register(nullptr) == AUD_ERROR_INVALID_ARGUMENT);
   AudHostApi host{};
-  AUD_CHECK(aud_audio_midi_register(&host) == AUD_ERROR_INVALID_ARGUMENT);
+  AUD_CHECK(aud_audio_with_midi_register(&host) == AUD_ERROR_INVALID_ARGUMENT);
   struct Calls {
     static int32_t registerType(void*, const AudNodeDescriptor*) {
       return AUD_OK;
@@ -173,17 +173,17 @@ AUD_TEST(nodes_register_refuses_a_bad_host) {
   host.register_node_type = Calls::registerType;
   host.struct_size = sizeof(AudHostApi);
   host.abi_major = AUD_ABI_VERSION_MAJOR + 1;
-  AUD_CHECK(aud_audio_midi_register(&host) == AUD_ERROR_ABI_MAJOR);
+  AUD_CHECK(aud_audio_with_midi_register(&host) == AUD_ERROR_ABI_MAJOR);
   host.abi_major = AUD_ABI_VERSION_MAJOR;
   host.struct_size = 16;
-  AUD_CHECK(aud_audio_midi_register(&host) == AUD_ERROR_ABI_MINOR);
+  AUD_CHECK(aud_audio_with_midi_register(&host) == AUD_ERROR_ABI_MINOR);
   host.struct_size = sizeof(AudHostApi);
-  AUD_CHECK(aud_audio_midi_register(&host) == AUD_OK);
+  AUD_CHECK(aud_audio_with_midi_register(&host) == AUD_OK);
 }
 
 AUD_TEST(nodes_register_once_per_graph) {
   Fixture f;
-  AUD_CHECK(aud_audio_midi_register(f.host()) == AUD_ERROR_DUPLICATE_TYPE);
+  AUD_CHECK(aud_audio_with_midi_register(f.host()) == AUD_ERROR_DUPLICATE_TYPE);
   const AudNodeDescriptor* input =
       aud_graph_node_type_by_id(f.graph, AUD_MIDI_INPUT_TYPE_ID);
   const AudNodeDescriptor* output =

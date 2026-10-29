@@ -1,4 +1,4 @@
-package com.audanika.aud_audio_midi_example
+package com.audanika.aud_audio_with_midi_example
 
 import io.flutter.embedding.android.FlutterActivity
 

@@ -7,7 +7,7 @@
 import 'dart:async';
 
 import 'package:aud_audio/aud_audio_ffi.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 import 'package:aud_dsp_sampler/aud_dsp_sampler_ffi.dart';
 import 'package:aud_dsp_sampler/testing.dart';
 import 'package:aud_midi/aud_midi.dart';
@@ -21,7 +21,7 @@ import 'keyboard.dart';
 
 // #############################################################################
 /// The keyboard-to-synth demo of S8: a MIDI keyboard plays the sampler
-/// through `aud_audio_midi`, with a port picker, the activity of the port,
+/// through `aud_audio_with_midi`, with a port picker, the activity of the port,
 /// the timing of the input and the measured input to output time.
 class MidiPage extends StatefulWidget {
   /// Creates the page on [engine]; [instrument] is written once by the app.

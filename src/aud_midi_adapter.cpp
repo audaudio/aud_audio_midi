@@ -17,7 +17,7 @@
 #include <new>
 #include <thread>
 
-#include "aud_audio_midi.h"
+#include "aud_audio_with_midi.h"
 #include "aud_midi_parser.h"
 #include "aud_ump.h"
 
@@ -247,7 +247,7 @@ void passUmp(AudMidiAdapter& a, const uint32_t* words,
 // ............................................................................
 // The C API
 
-AUD_EXPORT AudMidiAdapter* aud_audio_midi_adapter_create(
+AUD_EXPORT AudMidiAdapter* aud_audio_with_midi_adapter_create(
     const AudMidiAdapterConfig* config) {
   if (config == nullptr || config->struct_size < sizeof(AudMidiAdapterConfig) ||
       config->source == nullptr || config->push == nullptr ||
@@ -263,14 +263,14 @@ AUD_EXPORT AudMidiAdapter* aud_audio_midi_adapter_create(
   return adapter;
 }
 
-AUD_EXPORT void aud_audio_midi_adapter_close(AudMidiAdapter* adapter) {
+AUD_EXPORT void aud_audio_with_midi_adapter_close(AudMidiAdapter* adapter) {
   if (adapter == nullptr) return;
   if (adapter->closed.exchange(1, std::memory_order_seq_cst) != 0) return;
   const auto start = std::chrono::steady_clock::now();
   while (adapter->inFlight.load(std::memory_order_seq_cst) > 0) {
     if (std::chrono::steady_clock::now() - start > kCloseTimeout) {
       std::fprintf(stderr,
-                   "aud_audio_midi: a tap call did not return within %lld s; "
+                   "aud_audio_with_midi: a tap call did not return within %lld s; "
                    "the adapter is closed anyway\n",
                    static_cast<long long>(kCloseTimeout.count()));
       return;
@@ -279,13 +279,13 @@ AUD_EXPORT void aud_audio_midi_adapter_close(AudMidiAdapter* adapter) {
   }
 }
 
-AUD_EXPORT void aud_audio_midi_adapter_destroy(AudMidiAdapter* adapter) {
+AUD_EXPORT void aud_audio_with_midi_adapter_destroy(AudMidiAdapter* adapter) {
   if (adapter == nullptr) return;
-  aud_audio_midi_adapter_close(adapter);
+  aud_audio_with_midi_adapter_close(adapter);
   delete adapter;
 }
 
-AUD_EXPORT void aud_audio_midi_tap(void* user, uint32_t kind, const void* data,
+AUD_EXPORT void aud_audio_with_midi_tap(void* user, uint32_t kind, const void* data,
                                    uint32_t count,
                                    int64_t host_time_ns) AUD_MIDI_NONBLOCKING {
   if (user == nullptr) return;
@@ -330,7 +330,7 @@ AUD_EXPORT void aud_audio_midi_tap(void* user, uint32_t kind, const void* data,
   a.inFlight.fetch_sub(1, std::memory_order_release);
 }
 
-AUD_EXPORT int32_t aud_audio_midi_adapter_stats(const AudMidiAdapter* adapter,
+AUD_EXPORT int32_t aud_audio_with_midi_adapter_stats(const AudMidiAdapter* adapter,
                                                 AudMidiAdapterStats* stats) {
   if (adapter == nullptr || stats == nullptr ||
       stats->struct_size < sizeof(AudMidiAdapterStats)) {

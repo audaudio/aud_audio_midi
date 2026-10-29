@@ -21,20 +21,22 @@ import 'dart:ffi' as ffi;
 /// return at once and count as dropped_closed. The engine may then dispose
 /// the graph before the tap is detached. Calling it again changes nothing.
 @ffi.Native<ffi.Void Function(ffi.Pointer<AudMidiAdapter>)>()
-external void aud_audio_midi_adapter_close(ffi.Pointer<AudMidiAdapter> adapter);
+external void aud_audio_with_midi_adapter_close(
+  ffi.Pointer<AudMidiAdapter> adapter,
+);
 
 /// [control] Creates an adapter for a source; NULL for a NULL config, a
 /// short struct, a NULL source, push or release, or a group above 15.
 @ffi.Native<
   ffi.Pointer<AudMidiAdapter> Function(ffi.Pointer<AudMidiAdapterConfig>)
 >()
-external ffi.Pointer<AudMidiAdapter> aud_audio_midi_adapter_create(
+external ffi.Pointer<AudMidiAdapter> aud_audio_with_midi_adapter_create(
   ffi.Pointer<AudMidiAdapterConfig> config,
 );
 
 /// [control] Destroys the adapter, after the tap detached; closes it first.
 @ffi.Native<ffi.Void Function(ffi.Pointer<AudMidiAdapter>)>()
-external void aud_audio_midi_adapter_destroy(
+external void aud_audio_with_midi_adapter_destroy(
   ffi.Pointer<AudMidiAdapter> adapter,
 );
 
@@ -46,7 +48,7 @@ external void aud_audio_midi_adapter_destroy(
     ffi.Pointer<AudMidiAdapterStats>,
   )
 >()
-external int aud_audio_midi_adapter_stats(
+external int aud_audio_with_midi_adapter_stats(
   ffi.Pointer<AudMidiAdapter> adapter,
   ffi.Pointer<AudMidiAdapterStats> stats,
 );
@@ -54,7 +56,7 @@ external int aud_audio_midi_adapter_stats(
 /// [control] Registers the node types with the host api of an engine; AUD_OK
 /// or the first error code. An AudRegisterFunction.
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<core.AudHostApi>)>()
-external int aud_audio_midi_register(ffi.Pointer<core.AudHostApi> host);
+external int aud_audio_with_midi_register(ffi.Pointer<core.AudHostApi> host);
 
 /// The AudMidiTapFunction of an adapter; `user` is the adapter. Nonblocking.
 /// UMP passes through packet by packet, MIDI 1.0 bytes become UMP: running
@@ -79,7 +81,7 @@ external int aud_audio_midi_register(ffi.Pointer<core.AudHostApi> host);
     ffi.Int64,
   )
 >()
-external void aud_audio_midi_tap(
+external void aud_audio_with_midi_tap(
   ffi.Pointer<ffi.Void> user,
   int kind,
   ffi.Pointer<ffi.Void> data,

@@ -29,8 +29,8 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:aud_audio_midi_example/main.dart';
-import 'package:aud_audio_midi_example/midi_page.dart';
+import 'package:aud_audio_with_midi_example/main.dart';
+import 'package:aud_audio_with_midi_example/midi_page.dart';
 import 'package:aud_midi/aud_midi.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
