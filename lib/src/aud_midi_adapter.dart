@@ -8,7 +8,7 @@ import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
 
-import 'aud_audio_midi_bindings_generated.dart' as bindings;
+import 'aud_audio_with_midi_bindings_generated.dart' as bindings;
 
 /// The bytes of the buffer an adapter starts with; it grows to the largest
 /// push.
@@ -59,7 +59,7 @@ class AudMidiAdapter {
         ..push = Pointer.fromAddress(push)
         ..release = Pointer.fromAddress(release)
         ..size = Pointer.fromAddress(size);
-      _pointer = bindings.aud_audio_midi_adapter_create(config);
+      _pointer = bindings.aud_audio_with_midi_adapter_create(config);
     } finally {
       calloc.free(config);
     }
@@ -79,7 +79,7 @@ class AudMidiAdapter {
     _checkAlive();
     _reserve(words.length * 4);
     _buffer.cast<Uint32>().asTypedList(words.length).setAll(0, words);
-    bindings.aud_audio_midi_tap(
+    bindings.aud_audio_with_midi_tap(
       _pointer.cast(),
       bindings.AUD_MIDI_TAP_UMP,
       _buffer.cast(),
@@ -94,7 +94,7 @@ class AudMidiAdapter {
     _checkAlive();
     _reserve(bytes.length);
     _buffer.asTypedList(bytes.length).setAll(0, bytes);
-    bindings.aud_audio_midi_tap(
+    bindings.aud_audio_with_midi_tap(
       _pointer.cast(),
       bindings.AUD_MIDI_TAP_BYTES,
       _buffer.cast(),
@@ -107,7 +107,7 @@ class AudMidiAdapter {
   /// the source's release is raised.
   void gone({required int hostTimeNs}) {
     _checkAlive();
-    bindings.aud_audio_midi_tap(
+    bindings.aud_audio_with_midi_tap(
       _pointer.cast(),
       bindings.AUD_MIDI_TAP_GONE,
       nullptr,
@@ -121,14 +121,14 @@ class AudMidiAdapter {
   /// calls return at once and count as [AudMidiAdapterStats.droppedClosed].
   void close() {
     _checkAlive();
-    bindings.aud_audio_midi_adapter_close(_pointer);
+    bindings.aud_audio_with_midi_adapter_close(_pointer);
     _closed = true;
   }
 
   /// Frees the adapter, after the tap detached; closes it first.
   void dispose() {
     if (isDisposed) return;
-    bindings.aud_audio_midi_adapter_destroy(_pointer);
+    bindings.aud_audio_with_midi_adapter_destroy(_pointer);
     calloc.free(_buffer);
     _pointer = nullptr;
     _closed = true;
@@ -141,7 +141,7 @@ class AudMidiAdapter {
     final native = calloc<bindings.AudMidiAdapterStats>();
     try {
       native.ref.struct_size = sizeOf<bindings.AudMidiAdapterStats>();
-      bindings.aud_audio_midi_adapter_stats(_pointer, native);
+      bindings.aud_audio_with_midi_adapter_stats(_pointer, native);
       return AudMidiAdapterStats(
         pushed: native.ref.pushed,
         rejected: native.ref.rejected,
@@ -168,11 +168,11 @@ class AudMidiAdapter {
   /// Whether [dispose] ran.
   bool get isDisposed => _pointer == nullptr;
 
-  /// The address of `aud_audio_midi_tap`, the `AudMidiTapFunction` a
+  /// The address of `aud_audio_with_midi_tap`, the `AudMidiTapFunction` a
   /// backend calls with [address] as its user.
   static int get tapFunction =>
       Native.addressOf<NativeFunction<bindings.AudMidiTapFunctionFunction>>(
-        bindings.aud_audio_midi_tap,
+        bindings.aud_audio_with_midi_tap,
       ).address;
 
   // ...........................................................................

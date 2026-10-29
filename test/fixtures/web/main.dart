@@ -9,7 +9,7 @@
 
 // ignore_for_file: avoid_print
 
-import 'package:aud_audio_midi/aud_audio_midi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi.dart';
 
 void main() {
   print(

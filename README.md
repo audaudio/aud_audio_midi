@@ -1,8 +1,8 @@
-# aud_audio_midi
+# aud_audio_with_midi
 
 English | [Deutsch](README.de.md)
 
-[![CI](https://github.com/audaudio/aud_audio_midi/actions/workflows/quick_check.yaml/badge.svg)](https://github.com/audaudio/aud_audio_midi/actions/workflows/quick_check.yaml)
+[![CI](https://github.com/audaudio/aud_audio_with_midi/actions/workflows/quick_check.yaml/badge.svg)](https://github.com/audaudio/aud_audio_with_midi/actions/workflows/quick_check.yaml)
 
 MIDI bridge of the Audanika Audio Engine: aud_midi ports as event inlets
 and outlets of the graph.
@@ -38,9 +38,9 @@ The package is not published to pub.dev. Add it as a git dependency to
 
 ```yaml
 dependencies:
-  aud_audio_midi:
+  aud_audio_with_midi:
     git:
-      url: git@github.com:audaudio/aud_audio_midi.git
+      url: git@github.com:audaudio/aud_audio_with_midi.git
       tag_pattern: "{{version}}"
     version: ^0.1.6
 ```
@@ -58,7 +58,7 @@ A MIDI keyboard plays an instrument of an engine:
 
 ```dart
 import 'package:aud_audio/aud_audio_ffi.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 import 'package:aud_midi/aud_midi.dart';
 
 Future<void> play(AudNode instrument, AudEngine engine) async {
@@ -100,9 +100,9 @@ flutter test integration_test/midi_keyboard_test.dart -d <device> \
 
 ## Limitations
 
-- The bridge, the nodes and the adapter are native: `aud_audio_midi_ffi.dart`
+- The bridge, the nodes and the adapter are native: `aud_audio_with_midi_ffi.dart`
   works on the native platforms only; the neutral library
-  `aud_audio_midi.dart` compiles for the web but drives no port there
+  `aud_audio_with_midi.dart` compiles for the web but drives no port there
 - A SysEx over 64 KiB (`maxSysexBytes`) is dropped through its end; SysEx
   and clock are dropped while a source holds more than half its capacity
 - The output node drops SysEx unless its parameter `sysex` is on, since
@@ -135,7 +135,7 @@ flutter test integration_test/midi_keyboard_test.dart -d <device> \
   [native-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/native-001.md)
   and
   [ports-001](https://github.com/audmidi/aud_midi_pm/blob/main/doc/2026-Q4/concepts/decisions/ports-001.md)
-- The C API: [src/aud_audio_midi.h](src/aud_audio_midi.h); the parser:
+- The C API: [src/aud_audio_with_midi.h](src/aud_audio_with_midi.h); the parser:
   [src/aud_midi_parser.h](src/aud_midi_parser.h)
 - The notices: [NOTICES.md](NOTICES.md) - the package holds no
   third-party code
@@ -216,12 +216,12 @@ flutter test integration_test/midi_keyboard_test.dart -d <device> \
 
 ### The nodes
 
-The port nodes on a graph of `aud_audio_graph` (`aud_audio_midi_ffi.dart`
+The port nodes on a graph of `aud_audio_graph` (`aud_audio_with_midi_ffi.dart`
 on native platforms):
 
 ```dart
 import 'package:aud_audio_graph/aud_audio_graph_ffi.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 
 void main() {
   final graph = AudGraphFfi(maxFrames: 256);
@@ -254,7 +254,7 @@ void main() {
   control thread; the graph's Dart side persists them in the graph
   document (`stringsOf`, `toDocument`, `load`). The C ABI reads no
   strings back.
-- `aud_audio_midi_register(const AudHostApi*)` registers both types
+- `aud_audio_with_midi_register(const AudHostApi*)` registers both types
   (ABI 0.4); `AudAudioMidi.register` hands the function to an engine's
   package list, `AudAudioMidi.registerWith` registers with a graph.
 
@@ -280,7 +280,7 @@ backend calls the same function with `AudMidiAdapter.tapFunction` and
 `adapter.address`:
 
 ```dart
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 
 void feed(int source, int push, int release, int size) {
   final adapter = AudMidiAdapter(
@@ -299,7 +299,7 @@ void feed(int source, int push, int release, int size) {
 }
 ```
 
-- `aud_audio_midi_tap` is the `AudMidiTapFunction` of contract C2: UMP
+- `aud_audio_with_midi_tap` is the `AudMidiTapFunction` of contract C2: UMP
   words pass through packet by packet, bytes go through the parser, GONE
   raises the source's release and forgets the running status and an open
   SysEx; one the UMP path had pushed closes with the cut end packet at
@@ -307,10 +307,10 @@ void feed(int source, int push, int release, int size) {
 - The half-full rule: a SysEx that begins and a clock (0xF8) are dropped
   while the source holds more than half its capacity. The SysEx cap and a
   packet the source refuses drop a SysEx through its end, in both paths.
-- `aud_audio_midi_adapter_close` is synchronous: it raises a flag and
+- `aud_audio_with_midi_adapter_close` is synchronous: it raises a flag and
   waits for the tap calls in flight, bounded; afterwards the tap returns
   at once. So the engine may dispose the graph before the asynchronous
-  detach of the tap completes; `aud_audio_midi_adapter_destroy` follows
+  detach of the tap completes; `aud_audio_with_midi_adapter_destroy` follows
   after the detach.
 - The counters: pushed, rejected by the source, SysEx dropped by size,
   dropped by fill, gone, malformed, dropped after close, SysEx cut (closed

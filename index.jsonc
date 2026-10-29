@@ -5,7 +5,7 @@
 // found in the LICENSE file in the root of this package.
 
 {
-  "name": "aud_audio_midi",
+  "name": "aud_audio_with_midi",
   "summary": "MIDI bridge of the Audanika Audio Engine: aud_midi ports as event inlets and outlets of the graph.",
   "domain": [
     "AudMidiBridge, an extension of the engine: inputs and outputs of aud_midi ports by port id, the native tap or the Dart path, the fixed latency C = P + L + m of midi-003, hot-plug with release and rebind by fingerprint, statistics",

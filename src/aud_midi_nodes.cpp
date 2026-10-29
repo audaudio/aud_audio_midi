@@ -18,7 +18,7 @@
 #include <new>
 #include <string>
 
-#include "aud_audio_midi.h"
+#include "aud_audio_with_midi.h"
 #include "aud_midi_parser.h"
 #include "aud_ump.h"
 
@@ -187,7 +187,7 @@ const AudNodeDescriptor kOutputDescriptor = {
 
 }  // namespace
 
-AUD_EXPORT int32_t aud_audio_midi_register(const AudHostApi* host) {
+AUD_EXPORT int32_t aud_audio_with_midi_register(const AudHostApi* host) {
   if (host == nullptr || host->register_node_type == nullptr) {
     return AUD_ERROR_INVALID_ARGUMENT;
   }

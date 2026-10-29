@@ -7,24 +7,24 @@
 import 'dart:ffi';
 
 import 'package:aud_audio_core/aud_audio_core.dart';
-import 'package:aud_audio_midi/src/aud_audio_midi_bindings_generated.dart'
+import 'package:aud_audio_with_midi/src/aud_audio_with_midi_bindings_generated.dart'
     as bindings;
 import 'package:test/test.dart';
 
 void main() {
-  group('aud_audio_midi_bindings_generated.dart', () {
-    test('aud_audio_midi_register refuses a null host', () {
+  group('aud_audio_with_midi_bindings_generated.dart', () {
+    test('aud_audio_with_midi_register refuses a null host', () {
       expect(
-        bindings.aud_audio_midi_register(nullptr),
+        bindings.aud_audio_with_midi_register(nullptr),
         AUD_ERROR_INVALID_ARGUMENT,
       );
     });
 
     test('the adapter functions take a null adapter', () {
-      expect(bindings.aud_audio_midi_adapter_create(nullptr), nullptr);
-      bindings.aud_audio_midi_adapter_close(nullptr);
-      bindings.aud_audio_midi_adapter_destroy(nullptr);
-      bindings.aud_audio_midi_tap(
+      expect(bindings.aud_audio_with_midi_adapter_create(nullptr), nullptr);
+      bindings.aud_audio_with_midi_adapter_close(nullptr);
+      bindings.aud_audio_with_midi_adapter_destroy(nullptr);
+      bindings.aud_audio_with_midi_tap(
         nullptr,
         bindings.AUD_MIDI_TAP_GONE,
         nullptr,
@@ -32,7 +32,7 @@ void main() {
         1,
       );
       expect(
-        bindings.aud_audio_midi_adapter_stats(nullptr, nullptr),
+        bindings.aud_audio_with_midi_adapter_stats(nullptr, nullptr),
         AUD_ERROR_INVALID_ARGUMENT,
       );
     });

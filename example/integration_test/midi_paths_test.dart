@@ -34,9 +34,9 @@ import 'dart:ffi';
 import 'dart:isolate';
 
 import 'package:aud_audio/aud_audio_ffi.dart';
-import 'package:aud_audio_midi_example/main.dart';
-import 'package:aud_audio_midi_example/midi_page.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi_example/main.dart';
+import 'package:aud_audio_with_midi_example/midi_page.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 import 'package:aud_midi/aud_midi.dart';
 import 'package:ffi/ffi.dart';
 import 'package:flutter_test/flutter_test.dart';

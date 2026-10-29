@@ -1,4 +1,4 @@
-# aud_audio_midi_example
+# aud_audio_with_midi_example
 
 A MIDI keyboard plays the SFZ sampler of `aud_dsp_sampler` through
 `AudMidiBridge`, on iOS and Android:

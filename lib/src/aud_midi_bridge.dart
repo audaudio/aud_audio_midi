@@ -10,7 +10,7 @@ import 'dart:math' as math;
 import 'package:aud_audio/aud_audio_ffi.dart';
 import 'package:aud_midi/aud_midi.dart';
 
-import 'aud_audio_midi_ffi.dart';
+import 'aud_audio_with_midi_ffi.dart';
 import 'aud_midi_adapter.dart';
 import 'aud_midi_clock.dart';
 import 'aud_midi_nodes.dart';

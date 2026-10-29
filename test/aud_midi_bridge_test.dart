@@ -9,7 +9,7 @@ import 'dart:ffi';
 import 'dart:typed_data';
 
 import 'package:aud_audio/aud_audio_ffi.dart';
-import 'package:aud_audio_midi/aud_audio_midi_ffi.dart';
+import 'package:aud_audio_with_midi/aud_audio_with_midi_ffi.dart';
 import 'package:aud_midi/aud_midi.dart';
 import 'package:ffi/ffi.dart';
 import 'package:test/test.dart';
@@ -153,7 +153,7 @@ void main() {
     group('openInput', () {
       test('lists the ports and opens an input on the native path', () async {
         final bridge = await start();
-        expect(bridge.name, 'aud_audio_midi');
+        expect(bridge.name, 'aud_audio_with_midi');
         expect(engine.extensions, [bridge]);
         expect(bridge.inputPorts.map((p) => p.id), [keys.id]);
         expect(bridge.outputPorts.map((p) => p.id), [synth.id]);

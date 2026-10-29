@@ -18,7 +18,7 @@
 #include <thread>
 #include <vector>
 
-#include "aud_audio_midi.h"
+#include "aud_audio_with_midi.h"
 #include "aud_midi_parser.h"
 #include "aud_test.hpp"
 #include "aud_ump.h"
@@ -119,26 +119,26 @@ struct Fixture {
     source.violations.store(0);
     const AudMidiAdapterConfig config =
         configOf(source, capacity, maxSysex, group);
-    adapter = aud_audio_midi_adapter_create(&config);
+    adapter = aud_audio_with_midi_adapter_create(&config);
     AUD_CHECK(adapter != nullptr);
   }
-  ~Fixture() { aud_audio_midi_adapter_destroy(adapter); }
+  ~Fixture() { aud_audio_with_midi_adapter_destroy(adapter); }
 
   void ump(const std::vector<uint32_t>& words, int64_t time = 1000) {
-    aud_audio_midi_tap(adapter, AUD_MIDI_TAP_UMP, words.data(),
+    aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_UMP, words.data(),
                        static_cast<uint32_t>(words.size()), time);
   }
   void bytes(const std::vector<uint8_t>& data, int64_t time = 1000) {
-    aud_audio_midi_tap(adapter, AUD_MIDI_TAP_BYTES, data.data(),
+    aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_BYTES, data.data(),
                        static_cast<uint32_t>(data.size()), time);
   }
   void gone(int64_t time = 1000) {
-    aud_audio_midi_tap(adapter, AUD_MIDI_TAP_GONE, nullptr, 0, time);
+    aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_GONE, nullptr, 0, time);
   }
   AudMidiAdapterStats stats() const {
     AudMidiAdapterStats result{};
     result.struct_size = sizeof(AudMidiAdapterStats);
-    AUD_CHECK(aud_audio_midi_adapter_stats(adapter, &result) == AUD_OK);
+    AUD_CHECK(aud_audio_with_midi_adapter_stats(adapter, &result) == AUD_OK);
     return result;
   }
 };
@@ -178,46 +178,46 @@ std::vector<uint32_t> midi2NoteOn() {
 
 AUD_TEST(adapter_create_refuses_a_bad_config) {
   FakeSource& source = fakeSource();
-  AUD_CHECK(aud_audio_midi_adapter_create(nullptr) == nullptr);
+  AUD_CHECK(aud_audio_with_midi_adapter_create(nullptr) == nullptr);
   AudMidiAdapterConfig config = configOf(source);
   config.struct_size = 8;
-  AUD_CHECK(aud_audio_midi_adapter_create(&config) == nullptr);
+  AUD_CHECK(aud_audio_with_midi_adapter_create(&config) == nullptr);
   config = configOf(source);
   config.source = nullptr;
-  AUD_CHECK(aud_audio_midi_adapter_create(&config) == nullptr);
+  AUD_CHECK(aud_audio_with_midi_adapter_create(&config) == nullptr);
   config = configOf(source);
   config.push = nullptr;
-  AUD_CHECK(aud_audio_midi_adapter_create(&config) == nullptr);
+  AUD_CHECK(aud_audio_with_midi_adapter_create(&config) == nullptr);
   config = configOf(source);
   config.release = nullptr;
-  AUD_CHECK(aud_audio_midi_adapter_create(&config) == nullptr);
+  AUD_CHECK(aud_audio_with_midi_adapter_create(&config) == nullptr);
   config = configOf(source);
   config.group = 16;
-  AUD_CHECK(aud_audio_midi_adapter_create(&config) == nullptr);
+  AUD_CHECK(aud_audio_with_midi_adapter_create(&config) == nullptr);
   // Without a size function the half-full rule is off.
   config = configOf(source);
   config.size = nullptr;
-  AudMidiAdapter* adapter = aud_audio_midi_adapter_create(&config);
+  AudMidiAdapter* adapter = aud_audio_with_midi_adapter_create(&config);
   AUD_CHECK(adapter != nullptr);
   source.size.store(1000);
   source.count.store(0);
   const uint32_t clock = system(0xF8);
-  aud_audio_midi_tap(adapter, AUD_MIDI_TAP_UMP, &clock, 1, 1);
+  aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_UMP, &clock, 1, 1);
   AUD_CHECK(source.pushed() == 1);
-  aud_audio_midi_adapter_destroy(adapter);
-  aud_audio_midi_adapter_destroy(nullptr);
+  aud_audio_with_midi_adapter_destroy(adapter);
+  aud_audio_with_midi_adapter_destroy(nullptr);
 }
 
 AUD_TEST(adapter_stats_refuses_bad_arguments) {
   Fixture f;
   AudMidiAdapterStats stats{};
   stats.struct_size = sizeof(AudMidiAdapterStats);
-  AUD_CHECK(aud_audio_midi_adapter_stats(nullptr, &stats) ==
+  AUD_CHECK(aud_audio_with_midi_adapter_stats(nullptr, &stats) ==
             AUD_ERROR_INVALID_ARGUMENT);
-  AUD_CHECK(aud_audio_midi_adapter_stats(f.adapter, nullptr) ==
+  AUD_CHECK(aud_audio_with_midi_adapter_stats(f.adapter, nullptr) ==
             AUD_ERROR_INVALID_ARGUMENT);
   stats.struct_size = 8;
-  AUD_CHECK(aud_audio_midi_adapter_stats(f.adapter, &stats) ==
+  AUD_CHECK(aud_audio_with_midi_adapter_stats(f.adapter, &stats) ==
             AUD_ERROR_INVALID_ARGUMENT);
   const AudMidiAdapterStats zero = f.stats();
   AUD_CHECK(zero.pushed == 0 && zero.rejected == 0 && zero.gone == 0);
@@ -248,9 +248,9 @@ AUD_TEST(adapter_counts_a_truncated_ump_packet) {
   AUD_CHECK(f.source.pushed() == 1);
   AUD_CHECK(f.stats().malformed == 1);
   f.ump({});
-  aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_UMP, nullptr, 2, 1);
-  aud_audio_midi_tap(f.adapter, 99, nullptr, 0, 1);
-  aud_audio_midi_tap(nullptr, AUD_MIDI_TAP_UMP, nullptr, 0, 1);
+  aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_UMP, nullptr, 2, 1);
+  aud_audio_with_midi_tap(f.adapter, 99, nullptr, 0, 1);
+  aud_audio_with_midi_tap(nullptr, AUD_MIDI_TAP_UMP, nullptr, 0, 1);
   AUD_CHECK(f.stats().malformed == 3);
 }
 
@@ -393,14 +393,14 @@ AUD_TEST(adapter_drops_sysex_and_clock_while_the_source_is_over_half_full) {
   AUD_CHECK(f.stats().dropped_fill == 2);
   // The default capacity of 4096: 2049 waiting events are too many.
   AudMidiAdapterConfig config = configOf(f.source, 0);
-  AudMidiAdapter* adapter = aud_audio_midi_adapter_create(&config);
+  AudMidiAdapter* adapter = aud_audio_with_midi_adapter_create(&config);
   const uint32_t clock = system(0xF8);
   f.source.size.store(2048);
-  aud_audio_midi_tap(adapter, AUD_MIDI_TAP_UMP, &clock, 1, 1);
+  aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_UMP, &clock, 1, 1);
   f.source.size.store(2049);
-  aud_audio_midi_tap(adapter, AUD_MIDI_TAP_UMP, &clock, 1, 1);
+  aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_UMP, &clock, 1, 1);
   AUD_CHECK(f.source.pushed() == 6);
-  aud_audio_midi_adapter_destroy(adapter);
+  aud_audio_with_midi_adapter_destroy(adapter);
 }
 
 AUD_TEST(adapter_drops_the_rest_of_a_ump_sysex_the_source_refuses) {
@@ -471,7 +471,7 @@ AUD_TEST(adapter_applies_the_rules_to_the_byte_path) {
   AUD_CHECK(f.stats().sysex_cut == 1);
   AUD_CHECK(f.source.pushed() == 4);
   AUD_CHECK(f.source.at(3).words[0] == midi1(0xB0, 7, 0x7F));
-  aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, nullptr, 2, 1);
+  aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, nullptr, 2, 1);
   AUD_CHECK(f.stats().malformed == 2);
   // What the tap counted outside the parser survives the next feed: F7
   // without a SysEx is one more malformed byte.
@@ -503,16 +503,16 @@ AUD_TEST(adapter_closes_a_cut_byte_sysex_with_an_empty_end_packet) {
   // Cap 3: the cut comes within the first packet, nothing was pushed, so
   // nothing closes it.
   AudMidiAdapterConfig config = configOf(f.source, 16, 3, 3);
-  AudMidiAdapter* small = aud_audio_midi_adapter_create(&config);
+  AudMidiAdapter* small = aud_audio_with_midi_adapter_create(&config);
   const uint8_t four[] = {0xF0, 1, 2, 3, 4, 0xF7};
-  aud_audio_midi_tap(small, AUD_MIDI_TAP_BYTES, four, 6, 80);
+  aud_audio_with_midi_tap(small, AUD_MIDI_TAP_BYTES, four, 6, 80);
   AUD_CHECK(f.source.pushed() == 3);
   AudMidiAdapterStats stats{};
   stats.struct_size = sizeof(AudMidiAdapterStats);
-  AUD_CHECK(aud_audio_midi_adapter_stats(small, &stats) == AUD_OK);
+  AUD_CHECK(aud_audio_with_midi_adapter_stats(small, &stats) == AUD_OK);
   AUD_CHECK(stats.sysex_dropped_size == 1);
   AUD_CHECK(stats.sysex_cut == 0);
-  aud_audio_midi_adapter_destroy(small);
+  aud_audio_with_midi_adapter_destroy(small);
 }
 
 AUD_TEST(adapter_closes_a_byte_sysex_the_source_refuses_mid_way) {
@@ -636,7 +636,7 @@ AUD_TEST(adapter_gone_forgets_a_dropped_ump_sysex) {
 AUD_TEST(adapter_close_stops_the_tap_and_keeps_the_stats) {
   Fixture f;
   f.ump({midi1(0x90, 60, 100)});
-  aud_audio_midi_adapter_close(f.adapter);
+  aud_audio_with_midi_adapter_close(f.adapter);
   f.source.dead = true;
   f.ump({midi1(0x80, 60, 0)});
   f.bytes({0x80, 60, 0});
@@ -648,8 +648,8 @@ AUD_TEST(adapter_close_stops_the_tap_and_keeps_the_stats) {
   AUD_CHECK(stats.pushed == 1);
   AUD_CHECK(stats.dropped_closed == 3);
   AUD_CHECK(stats.gone == 0);
-  aud_audio_midi_adapter_close(f.adapter);
-  aud_audio_midi_adapter_close(nullptr);
+  aud_audio_with_midi_adapter_close(f.adapter);
+  aud_audio_with_midi_adapter_close(nullptr);
   AUD_CHECK(f.stats().dropped_closed == 3);
 }
 
@@ -668,21 +668,21 @@ AUD_TEST(adapter_threads_producer_gone_and_close) {
     const uint8_t sysexTail[] = {5, 6, 7, 0xF7};
     const uint32_t clock = system(0xF8);
     while (!stop.load(std::memory_order_relaxed)) {
-      aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, on, 3, 1);
-      aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_UMP, &clock, 1, 2);
-      aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, sysexHead, 5, 3);
-      aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, sysexTail, 4, 4);
-      aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, off, 3, 5);
+      aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, on, 3, 1);
+      aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_UMP, &clock, 1, 2);
+      aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, sysexHead, 5, 3);
+      aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, sysexTail, 4, 4);
+      aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_BYTES, off, 3, 5);
       calls.fetch_add(5, std::memory_order_relaxed);
     }
   });
   std::thread watcher([&] {
     while (!stop.load(std::memory_order_relaxed)) {
-      aud_audio_midi_tap(f.adapter, AUD_MIDI_TAP_GONE, nullptr, 0, 9);
+      aud_audio_with_midi_tap(f.adapter, AUD_MIDI_TAP_GONE, nullptr, 0, 9);
       goneCalls.fetch_add(1, std::memory_order_relaxed);
       AudMidiAdapterStats stats{};
       stats.struct_size = sizeof(AudMidiAdapterStats);
-      aud_audio_midi_adapter_stats(f.adapter, &stats);
+      aud_audio_with_midi_adapter_stats(f.adapter, &stats);
       std::this_thread::yield();
     }
   });
@@ -692,7 +692,7 @@ AUD_TEST(adapter_threads_producer_gone_and_close) {
          goneCalls.load(std::memory_order_relaxed) == 0) {
     std::this_thread::yield();
   }
-  aud_audio_midi_adapter_close(f.adapter);
+  aud_audio_with_midi_adapter_close(f.adapter);
   f.source.dead = true;
   // The producer keeps calling the closed tap for a while.
   const uint64_t atClose = calls.load(std::memory_order_relaxed);
@@ -730,16 +730,16 @@ AUD_TEST(adapter_close_waits_for_a_call_in_flight) {
   };
   AudMidiAdapterConfig config = configOf(f.source);
   config.push = Slow::push;
-  AudMidiAdapter* adapter = aud_audio_midi_adapter_create(&config);
+  AudMidiAdapter* adapter = aud_audio_with_midi_adapter_create(&config);
   slow.store(true);
   std::thread producer([&] {
     const uint32_t note = midi1(0x90, 60, 100);
-    aud_audio_midi_tap(adapter, AUD_MIDI_TAP_UMP, &note, 1, 1);
+    aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_UMP, &note, 1, 1);
   });
   while (!inPush.load()) std::this_thread::yield();
   std::atomic<bool> closed{false};
   std::thread closer([&] {
-    aud_audio_midi_adapter_close(adapter);
+    aud_audio_with_midi_adapter_close(adapter);
     closed.store(true);
   });
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
@@ -749,7 +749,7 @@ AUD_TEST(adapter_close_waits_for_a_call_in_flight) {
   producer.join();
   AUD_CHECK(closed.load());
   AUD_CHECK(f.source.pushed() == 1);
-  aud_audio_midi_adapter_destroy(adapter);
+  aud_audio_with_midi_adapter_destroy(adapter);
 }
 
 // ............................................................................
@@ -779,9 +779,9 @@ AUD_TEST(rtsan_tap_probe) {
   Fixture f;
   AudMidiAdapterConfig config = configOf(f.source);
   config.push = probePush;
-  AudMidiAdapter* adapter = aud_audio_midi_adapter_create(&config);
+  AudMidiAdapter* adapter = aud_audio_with_midi_adapter_create(&config);
   const uint32_t note = midi1(0x90, 60, 100);
-  aud_audio_midi_tap(adapter, AUD_MIDI_TAP_UMP, &note, 1, 1);
+  aud_audio_with_midi_tap(adapter, AUD_MIDI_TAP_UMP, &note, 1, 1);
   AUD_CHECK(f.source.pushed() == 1);
-  aud_audio_midi_adapter_destroy(adapter);
+  aud_audio_with_midi_adapter_destroy(adapter);
 }

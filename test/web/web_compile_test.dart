@@ -9,7 +9,7 @@ import 'dart:io';
 import 'package:test/test.dart';
 
 void main() {
-  group('aud_audio_midi.dart', () {
+  group('aud_audio_with_midi.dart', () {
     test('compiles for the web without dart:ffi (web-001)', () async {
       final out = await Directory.systemTemp.createTemp('aud_web_');
       try {

@@ -7,7 +7,7 @@
 // The parser of a MIDI 1.0 byte stream into Universal MIDI Packets (ticket
 // 26, scope 5): one per port, fed chunk by chunk, with its state kept
 // across the chunks, so a message may split at any byte. Internal to the
-// package; the adapter of aud_audio_midi.h owns one per port.
+// package; the adapter of aud_audio_with_midi.h owns one per port.
 //
 // - Channel voice messages become type 2 packets (MIDI 1.0 protocol) on
 //   the configured group; running status holds until a status byte that
