@@ -18,12 +18,12 @@ dependencies:
     git:
       url: git@github.com:audaudio/aud_audio.git
       tag_pattern: "{{version}}"
-    version: ^0.5.3
+    version: ^0.5.4
   aud_dsp_sampler:
     git:
       url: git@github.com:audaudio/aud_dsp_sampler.git
       tag_pattern: "{{version}}"
-    version: ^0.5.0
+    version: ^0.5.1
   aud_midi: ^0.2.0
   ffi: ^2.2.0
   path_provider: ^2.1.6

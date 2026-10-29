@@ -17,17 +17,17 @@ dependencies:
     git:
       url: git@github.com:audaudio/aud_audio_core.git
       tag_pattern: "{{version}}"
-    version: ^0.6.1
+    version: ^0.6.2
   aud_audio_graph:
     git:
       url: git@github.com:audaudio/aud_audio_graph.git
       tag_pattern: "{{version}}"
-    version: ^0.6.2
+    version: ^0.6.3
   aud_audio:
     git:
       url: git@github.com:audaudio/aud_audio.git
       tag_pattern: "{{version}}"
-    version: ^0.5.3
+    version: ^0.5.4
   aud_midi: ^0.2.0
   aud_midi_core: ^0.2.0
   aud_midi_standard: ^0.3.0
