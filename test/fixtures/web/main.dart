@@ -14,6 +14,6 @@ import 'package:aud_audio_with_midi/aud_audio_with_midi.dart';
 void main() {
   print(
     '${AudMidiInputNode.typeId} ${AudMidiOutputNode.typeId} '
-    '${AudMidiPortNode.portId} $audAudioMidiVersion',
+    '${AudMidiPortNode.portId} $audAudioWithMidiVersion',
   );
 }
