@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 - 2026-10-29
 
 ### Added
 
@@ -38,7 +38,6 @@
 - Lift the lock file to the newest resolvable versions
 
 - Upgrade the git dependencies to their published versions
-
 
 ## 0.1.6 - 2026-10-24
 
@@ -135,7 +134,6 @@
 - Let the detach of the disposal test fail with a MidiPortGone, which the MIDI host swallows
 
 - Add review fixes of ticket 26
-
 
 ## 0.0.2 - 2026-10-08
 
