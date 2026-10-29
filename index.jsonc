@@ -12,6 +12,7 @@
     "Port nodes aud.midi.input and aud.midi.output: events pass through at their offset, SysEx filtered at the output, the port id and fingerprint as string keys",
     "The MIDI 1.0 byte stream parser to UMP: running status and SysEx across chunks, real-time inside SysEx, SysEx7 packed into type 3 packets",
     "The tap adapter: the AudMidiTapFunction of a port pushes UMP into an event source of the graph through function pointers, with the SysEx caps, the half-full rule, GONE, close and counters; the Dart path calls it through FFI",
+    "The example app in the pub workspace: a MIDI keyboard plays the SFZ sampler, port picker, Bluetooth MIDI, timing and input to output time, integration tests of the budgets and the native and Dart paths",
   ],
   "interfaces": {
     "uses": {
@@ -21,6 +22,7 @@
       "aud_midi": "package dependency: the ports, their native taps and the Dart packets",
       "aud_midi_core": "package dependency: the native tap contract",
       "aud_midi_standard": "package dependency: the port model and the MIDI types",
+      "aud_dsp_sampler": "the example app plays the sampler",
     },
     "usedBy": {},
   },

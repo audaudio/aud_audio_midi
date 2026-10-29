@@ -1,0 +1,40 @@
+name: aud_audio_midi_example
+description: "Example app of aud_audio_midi: a MIDI keyboard plays the SFZ sampler through the MIDI bridge, with a port picker, the timing of the input and the numbers of the engine."
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.0
+
+resolution: workspace
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # The example plays the package of this checkout.
+  aud_audio_midi:
+    path: ../
+  aud_audio:
+    git:
+      url: git@github.com:audaudio/aud_audio.git
+      tag_pattern: "{{version}}"
+    version: ^0.5.2
+  aud_dsp_sampler:
+    git:
+      url: git@github.com:audaudio/aud_dsp_sampler.git
+      tag_pattern: "{{version}}"
+    version: ^0.5.0
+  aud_midi: ^0.2.0
+  ffi: ^2.2.0
+  path_provider: ^2.1.6
+  permission_handler: ^13.0.2
+
+dev_dependencies:
+  flutter_lints: ^6.0.0
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true

@@ -78,6 +78,27 @@ Future<void> play(AudNode instrument, AudEngine engine) async {
 }
 ```
 
+`example/` ist eine Keyboard-zu-Synth-App und Mitglied des Pub-Workspace
+dieses Repos: Ein Port von `aud_midi` spielt den SFZ-Sampler von
+`aud_dsp_sampler` über `AudMidiBridge`, mit Port-Auswahl, Bluetooth-MIDI,
+der Aktivität des Ports, dem festen oder sofortigen Timing, der gemessenen
+Zeit vom Eingang zum Ausgang und den Zahlen der Engine. `midi_test.dart`
+spielt eine aufgenommene Performance aus einer Quelle der App in den
+Eingang, `midi_paths_test.dart` misst den nativen und die Dart-Wege von
+midi-002, und `midi_keyboard_test.dart` führt eine Person durch das
+Spielen eines echten Keyboards, das Hot-Plug und Bluetooth-MIDI:
+
+```bash
+cd example
+flutter run -d <ios simulator | android emulator | device>
+flutter test integration_test/midi_test.dart -d <device> \
+  --dart-define=AUD_WARMUP_SECONDS=1200 --dart-define=AUD_MEASURE_SECONDS=600
+flutter test integration_test/midi_paths_test.dart -d <device> \
+  --dart-define=AUD_MARGIN_SECONDS=60 --dart-define=AUD_MEASURE_SECONDS=600
+flutter test integration_test/midi_keyboard_test.dart -d <device> \
+  --dart-define=AUD_PLAY_SECONDS=600 --dart-define=AUD_BLUETOOTH=true
+```
+
 ## Einschränkungen
 
 - Die Brücke, die Knoten und der Adapter sind nativ:

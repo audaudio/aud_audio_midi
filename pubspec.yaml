@@ -1,12 +1,15 @@
 name: aud_audio_midi
 description: "MIDI bridge of the Audanika Audio Engine: aud_midi ports as event inlets and outlets of the graph"
-version: 0.2.0
+version: 0.2.1
 publish_to: none
 homepage: https://github.com/audaudio/aud_audio_midi
 repository: https://github.com/audaudio/aud_audio_midi
 
 environment:
   sdk: ^3.13.0
+
+workspace:
+  - example
 
 dependencies:
   ffi: ^2.2.0
@@ -24,7 +27,7 @@ dependencies:
     git:
       url: git@github.com:audaudio/aud_audio.git
       tag_pattern: "{{version}}"
-    version: ^0.5.1
+    version: ^0.5.2
   aud_midi: ^0.2.0
   aud_midi_core: ^0.2.0
   aud_midi_standard: ^0.3.0
@@ -40,4 +43,5 @@ dev_dependencies:
   ffigen: ^23.0.0
   flutter_lints: ^6.0.0
   helix: ^1.14.0
-  test: ^1.33.0
+  # Within the test_api that flutter_test of the example pins.
+  test: ^1.31.1
