@@ -5,6 +5,7 @@
 ### Added
 
 - Add an example app with a MIDI keyboard
+- Add the blog post on the example app
 
 ## 0.2.0 - 2026-10-28
 
