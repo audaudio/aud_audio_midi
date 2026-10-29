@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Add a blog post about the rename
+
 ### Changed
 
 - Rename the package to aud_audio_with_midi
